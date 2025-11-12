@@ -50,3 +50,6 @@ next-env.d.ts
 
 # Sentry config file
 .env.sentry-build-plugin
+
+.idea/
+local.db
