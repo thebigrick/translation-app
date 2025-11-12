@@ -11,10 +11,10 @@
     "build:graphql-client": "npm run build --prefix lib/graphql-client",
     "build:rest-client": "npm run build --prefix lib/rest-client",
     "postinstall": "node ./postinstall.mjs",
-    "db:generate": "NODE_OPTIONS='-r ts-node/register/transpile-only' drizzle-kit generate",
-    "db:migrate": "NODE_OPTIONS='-r ts-node/register/transpile-only' drizzle-kit migrate",
-    "db:push": "NODE_OPTIONS='-r ts-node/register/transpile-only' drizzle-kit push",
-    "db:studio": "NODE_OPTIONS='-r ts-node/register/transpile-only' drizzle-kit studio",
+    "db:generate": "node scripts/drizzle-kit.mjs generate",
+    "db:migrate": "node scripts/drizzle-kit.mjs migrate",
+    "db:push": "node scripts/drizzle-kit.mjs push",
+    "db:studio": "node scripts/drizzle-kit.mjs studio",
     "generate:schema": "tsx scripts/generate-schema.ts"
   },
   "dependencies": {
@@ -67,6 +67,7 @@
     "@types/react-dom": "19.0.2",
     "@types/styled-components": "^5.1.34",
     "autoprefixer": "^10.0.1",
+    "cross-env": "^7.0.3",
     "drizzle-kit": "^0.24.2",
     "eslint": "^8",
     "eslint-config-next": "15.1.0",
