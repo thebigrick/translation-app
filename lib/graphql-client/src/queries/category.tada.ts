@@ -3,13 +3,17 @@ import { formatChannelId } from "../utils";
 
 // Get Categories Translations Query
 export const GetCategoryTranslationsDocument = graphql(`
-  query GetCategoryTranslations($channelId: ID!, $localeId: ID!) {
+  query GetCategoryTranslations($channelId: ID!, $localeId: ID!, $first: Int, $after: String) {
     store {
-      translations(filters: {
-        resourceType: CATEGORIES,
-        channelId: $channelId,
-        localeId: $localeId
-      }) {
+      translations(
+        filters: {
+          resourceType: CATEGORIES,
+          channelId: $channelId,
+          localeId: $localeId
+        },
+        first: $first,
+        after: $after
+      ) {
         edges {
           node {
             resourceId
@@ -111,9 +115,26 @@ export function createDeleteCategoryTranslationsVariables(params: {
 export function createGetCategoryTranslationsVariables(params: {
   channelId: number;
   locale: string;
+  first?: number;
+  after?: string | null;
 }) {
-  return {
+  const variables: {
+    channelId: string;
+    localeId: string;
+    first?: number;
+    after?: string | null;
+  } = {
     channelId: `bc/store/channel/${params.channelId}`,
     localeId: `bc/store/locale/${params.locale}`
   };
+
+  if (typeof params.first === 'number') {
+    variables.first = params.first;
+  }
+
+  if (params.after !== undefined && params.after !== null) {
+    variables.after = params.after;
+  }
+
+  return variables;
 } 

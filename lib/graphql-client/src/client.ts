@@ -263,11 +263,7 @@ export class GraphQLClient {
       this.headersToObject(response.headers)
     );
     const responseBody = await response.clone().json();
-    this.logger(
-      `[%s] Response Body: %j`,
-      requestId,
-      responseBody
-    );
+    this.logger(`[%s] Response Body: %j`, requestId, responseBody);
 
     // Handle rate limiting
     if (response.status === 429) {
@@ -340,10 +336,7 @@ export class GraphQLClient {
     id: string;
     input: { label: AppExtensionLabel };
   }): Promise<AppExtension> {
-    this.logger(
-      "Updating app extension id=%s",
-      params.id
-    );
+    this.logger("Updating app extension id=%s", params.id);
     const variables = updateAppExtensionInput({
       id: params.id,
       label: params.input.label,
@@ -381,19 +374,25 @@ export class GraphQLClient {
     return deletedId;
   }
 
-  async upsertAppExtension(params: {
-    context: AppExtensionContext;
-    model: AppExtensionModel;
-    url: string;
-    label: AppExtensionLabel;
-  }, options?: {
-    cleanupDuplicates?: boolean;
-  }): Promise<string> {
+  async upsertAppExtension(
+    params: {
+      context: AppExtensionContext;
+      model: AppExtensionModel;
+      url: string;
+      label: AppExtensionLabel;
+    },
+    options?: {
+      cleanupDuplicates?: boolean;
+    }
+  ): Promise<string> {
     this.logger("Upserting app extension");
     try {
       const extensions = await this.getAppExtensions();
       const matchingExtensions = extensions.filter(
-        (ext) => ext.context === params.context && ext.model === params.model && ext.url === params.url
+        (ext) =>
+          ext.context === params.context &&
+          ext.model === params.model &&
+          ext.url === params.url
       );
 
       // Handle cleanup of duplicates if enabled and there are multiple matches
@@ -414,7 +413,7 @@ export class GraphQLClient {
           id: extensionToKeep.id,
           input: { label: params.label },
         });
-        
+
         return extensionToKeep.id;
       }
 
@@ -543,86 +542,194 @@ export class GraphQLClient {
       variables.removedModifiersInput.data.modifiers.length > 0;
 
     // Check if there are any removals or updates to make
-    const hasAnyRemovals = hasRemovedBasicInfo || hasRemovedSeo || hasRemovedStorefrontDetails || 
-      hasRemovedPreOrder || hasRemovedOptions || hasRemovedModifiers || hasRemovedCustomFields;
+    const hasAnyRemovals =
+      hasRemovedBasicInfo ||
+      hasRemovedSeo ||
+      hasRemovedStorefrontDetails ||
+      hasRemovedPreOrder ||
+      hasRemovedOptions ||
+      hasRemovedModifiers ||
+      hasRemovedCustomFields;
 
-    const hasAnyUpdates = hasBasicInfo || hasSeo || hasStorefrontDetails || 
-      hasPreOrder || hasOptions || hasModifiers || hasCustomFields;
+    const hasAnyUpdates =
+      hasBasicInfo ||
+      hasSeo ||
+      hasStorefrontDetails ||
+      hasPreOrder ||
+      hasOptions ||
+      hasModifiers ||
+      hasCustomFields;
 
     // If no updates or removals, return early
     if (!hasAnyRemovals && !hasAnyUpdates) {
       return { data: {} };
     }
 
-    const removalMutations = hasAnyRemovals ? {
-      query: `
+    const removalMutations = hasAnyRemovals
+      ? {
+          query: `
         mutation (
-          ${hasRemovedBasicInfo ? "$removedBasicInfoInput: RemoveProductBasicInformationOverridesInput!," : ""}
-          ${hasRemovedSeo ? "$removedSeoInput: RemoveProductSeoInformationOverridesInput!," : ""}
-          ${hasRemovedStorefrontDetails ? "$removedStorefrontDetailsInput: RemoveProductStorefrontDetailsOverridesInput!," : ""}
-          ${hasRemovedPreOrder ? "$removedPreOrderInput: RemoveProductPreOrderSettingsOverridesInput!," : ""}
-          ${hasRemovedOptions ? "$removedOptionsInput: RemoveProductOptionsOverridesInput!," : ""}
-          ${hasRemovedModifiers ? "$removedModifiersInput: RemoveProductModifiersOverridesInput!," : ""}
-          ${hasRemovedCustomFields ? "$removedCustomFieldsInput: RemoveProductCustomFieldsOverridesInput!" : ""}
+          ${
+            hasRemovedBasicInfo
+              ? "$removedBasicInfoInput: RemoveProductBasicInformationOverridesInput!,"
+              : ""
+          }
+          ${
+            hasRemovedSeo
+              ? "$removedSeoInput: RemoveProductSeoInformationOverridesInput!,"
+              : ""
+          }
+          ${
+            hasRemovedStorefrontDetails
+              ? "$removedStorefrontDetailsInput: RemoveProductStorefrontDetailsOverridesInput!,"
+              : ""
+          }
+          ${
+            hasRemovedPreOrder
+              ? "$removedPreOrderInput: RemoveProductPreOrderSettingsOverridesInput!,"
+              : ""
+          }
+          ${
+            hasRemovedOptions
+              ? "$removedOptionsInput: RemoveProductOptionsOverridesInput!,"
+              : ""
+          }
+          ${
+            hasRemovedModifiers
+              ? "$removedModifiersInput: RemoveProductModifiersOverridesInput!,"
+              : ""
+          }
+          ${
+            hasRemovedCustomFields
+              ? "$removedCustomFieldsInput: RemoveProductCustomFieldsOverridesInput!"
+              : ""
+          }
         ) {
           product {
-            ${hasRemovedBasicInfo ? `
+            ${
+              hasRemovedBasicInfo
+                ? `
             removeProductBasicInformationOverrides(input: $removedBasicInfoInput) {
               product { id }
-            }` : ""}
-            ${hasRemovedSeo ? `
+            }`
+                : ""
+            }
+            ${
+              hasRemovedSeo
+                ? `
             removeProductSeoInformationOverrides(input: $removedSeoInput) {
               product { id }
-            }` : ""}
-            ${hasRemovedStorefrontDetails ? `
+            }`
+                : ""
+            }
+            ${
+              hasRemovedStorefrontDetails
+                ? `
             removeProductStorefrontDetailsOverrides(input: $removedStorefrontDetailsInput) {
               product { id }
-            }` : ""}
-            ${hasRemovedPreOrder ? `
+            }`
+                : ""
+            }
+            ${
+              hasRemovedPreOrder
+                ? `
             removeProductPreOrderSettingsOverrides(input: $removedPreOrderInput) {
               product { id }
-            }` : ""}
-            ${hasRemovedOptions ? `
+            }`
+                : ""
+            }
+            ${
+              hasRemovedOptions
+                ? `
             removeProductOptionsOverrides(input: $removedOptionsInput) {
               product { id }
-            }` : ""}
-            ${hasRemovedModifiers ? `
+            }`
+                : ""
+            }
+            ${
+              hasRemovedModifiers
+                ? `
             removeProductModifiersOverrides(input: $removedModifiersInput) {
               product { id }
-            }` : ""}
-            ${hasRemovedCustomFields ? `
+            }`
+                : ""
+            }
+            ${
+              hasRemovedCustomFields
+                ? `
             removeProductCustomFieldsOverrides(input: $removedCustomFieldsInput) {
               product { id }
-            }` : ""}
+            }`
+                : ""
+            }
           }
         }
       `,
-      variables: {
-        ...(hasRemovedBasicInfo && { removedBasicInfoInput: variables.removedBasicInfoInput }),
-        ...(hasRemovedSeo && { removedSeoInput: variables.removedSeoInput }),
-        ...(hasRemovedStorefrontDetails && { removedStorefrontDetailsInput: variables.removedStorefrontDetailsInput }),
-        ...(hasRemovedPreOrder && { removedPreOrderInput: variables.removedPreOrderInput }),
-        ...(hasRemovedOptions && { removedOptionsInput: variables.removedOptionsInput }),
-        ...(hasRemovedModifiers && { removedModifiersInput: variables.removedModifiersInput }),
-        ...(hasRemovedCustomFields && { removedCustomFieldsInput: variables.removedCustomFieldsInput }),
-      },
-    } : null;
+          variables: {
+            ...(hasRemovedBasicInfo && {
+              removedBasicInfoInput: variables.removedBasicInfoInput,
+            }),
+            ...(hasRemovedSeo && {
+              removedSeoInput: variables.removedSeoInput,
+            }),
+            ...(hasRemovedStorefrontDetails && {
+              removedStorefrontDetailsInput:
+                variables.removedStorefrontDetailsInput,
+            }),
+            ...(hasRemovedPreOrder && {
+              removedPreOrderInput: variables.removedPreOrderInput,
+            }),
+            ...(hasRemovedOptions && {
+              removedOptionsInput: variables.removedOptionsInput,
+            }),
+            ...(hasRemovedModifiers && {
+              removedModifiersInput: variables.removedModifiersInput,
+            }),
+            ...(hasRemovedCustomFields && {
+              removedCustomFieldsInput: variables.removedCustomFieldsInput,
+            }),
+          },
+        }
+      : null;
 
-    const updateMutations = hasAnyUpdates ? {
-      query: `
+    const updateMutations = hasAnyUpdates
+      ? {
+          query: `
         mutation (
           $channelId: ID!,
           $locale: String!,
           ${hasBasicInfo ? "$input: SetProductBasicInformationInput!," : ""}
           ${hasSeo ? "$seoInput: SetProductSeoInformationInput!," : ""}
-          ${hasPreOrder ? "$preOrderInput: SetProductPreOrderSettingsInput!," : ""}
-          ${hasStorefrontDetails ? "$storefrontInput: SetProductStorefrontDetailsInput!," : ""}
-          ${hasOptions ? "$optionsInput: SetProductOptionsInformationInput!," : ""}
-          ${hasModifiers ? "$modifiersInput: SetProductModifiersInformationInput!," : ""}
-          ${hasCustomFields ? "$customFieldsInput: UpdateProductCustomFieldsInput!" : ""}
+          ${
+            hasPreOrder
+              ? "$preOrderInput: SetProductPreOrderSettingsInput!,"
+              : ""
+          }
+          ${
+            hasStorefrontDetails
+              ? "$storefrontInput: SetProductStorefrontDetailsInput!,"
+              : ""
+          }
+          ${
+            hasOptions
+              ? "$optionsInput: SetProductOptionsInformationInput!,"
+              : ""
+          }
+          ${
+            hasModifiers
+              ? "$modifiersInput: SetProductModifiersInformationInput!,"
+              : ""
+          }
+          ${
+            hasCustomFields
+              ? "$customFieldsInput: UpdateProductCustomFieldsInput!"
+              : ""
+          }
         ) {
           product {
-            ${hasBasicInfo ? `
+            ${
+              hasBasicInfo
+                ? `
             setProductBasicInformation(input: $input) {
               product {
                 id
@@ -633,8 +740,12 @@ export class GraphQLClient {
                   }
                 }
               }
-            }` : ""}
-            ${hasSeo ? `
+            }`
+                : ""
+            }
+            ${
+              hasSeo
+                ? `
             setProductSeoInformation(input: $seoInput) {
               product {
                 id
@@ -645,8 +756,12 @@ export class GraphQLClient {
                   }
                 }
               }
-            }` : ""}
-            ${hasPreOrder ? `
+            }`
+                : ""
+            }
+            ${
+              hasPreOrder
+                ? `
             setProductPreOrderSettings(input: $preOrderInput) {
               product {
                 overridesForLocale (localeContext: { channelId: $channelId, locale: $locale }) {
@@ -655,8 +770,12 @@ export class GraphQLClient {
                   }
                 }
               }
-            }` : ""}
-            ${hasStorefrontDetails ? `
+            }`
+                : ""
+            }
+            ${
+              hasStorefrontDetails
+                ? `
             setProductStorefrontDetails(input: $storefrontInput) {
               product {
                 overridesForLocale (localeContext: { channelId: $channelId, locale: $locale }) {
@@ -667,8 +786,12 @@ export class GraphQLClient {
                   }
                 }
               }
-            }` : ""}
-            ${hasOptions ? `
+            }`
+                : ""
+            }
+            ${
+              hasOptions
+                ? `
             setProductOptionsInformation (input: $optionsInput) {
               product {
                 id
@@ -693,8 +816,12 @@ export class GraphQLClient {
                 }
               }
             }
-            ` : ""}
-            ${hasModifiers ? `
+            `
+                : ""
+            }
+            ${
+              hasModifiers
+                ? `
             setProductModifiersInformation (input: $modifiersInput) {
               product {
                 id
@@ -842,8 +969,12 @@ export class GraphQLClient {
                 }
               }
             }
-            ` : ""}
-            ${hasCustomFields ? `
+            `
+                : ""
+            }
+            ${
+              hasCustomFields
+                ? `
             updateProductCustomFields(input: $customFieldsInput) {
               product {
                 customFields {
@@ -867,22 +998,29 @@ export class GraphQLClient {
                 }
               }
             }
-            ` : ""}
+            `
+                : ""
+            }
           }
         }
       `,
-      variables: {
-        channelId: variables.channelId,
-        locale: variables.locale,
-        ...(hasBasicInfo && { input: variables.input }),
-        ...(hasSeo && { seoInput: variables.seoInput }),
-        ...(hasPreOrder && { preOrderInput: variables.preOrderInput }),
-        ...(hasStorefrontDetails && { storefrontInput: variables.storefrontInput }),
-        ...(hasOptions && { optionsInput: variables.optionsInput }),
-        ...(hasModifiers && { modifiersInput: variables.modifiersInput }),
-        ...(hasCustomFields && { customFieldsInput: variables.customFieldsInput }),
-      },
-    } : null;
+          variables: {
+            channelId: variables.channelId,
+            locale: variables.locale,
+            ...(hasBasicInfo && { input: variables.input }),
+            ...(hasSeo && { seoInput: variables.seoInput }),
+            ...(hasPreOrder && { preOrderInput: variables.preOrderInput }),
+            ...(hasStorefrontDetails && {
+              storefrontInput: variables.storefrontInput,
+            }),
+            ...(hasOptions && { optionsInput: variables.optionsInput }),
+            ...(hasModifiers && { modifiersInput: variables.modifiersInput }),
+            ...(hasCustomFields && {
+              customFieldsInput: variables.customFieldsInput,
+            }),
+          },
+        }
+      : null;
 
     // Run mutations in parallel if there are operations to perform
     const promises = [];
@@ -1061,12 +1199,14 @@ export class GraphQLClient {
   async getCategoryTranslations(params: {
     channelId: number;
     locale: string;
+    first?: number;
+    after?: string | null;
   }) {
     type Response = ResultOf<typeof GetCategoryTranslationsDocument>;
     type TranslationsType = NonNullable<Response["store"]>["translations"];
 
     const variables = createGetCategoryTranslationsVariables(params);
-    
+
     const response = await this.request<Response>(
       { query: print(GetCategoryTranslationsDocument) },
       variables
@@ -1087,13 +1227,13 @@ export class GraphQLClient {
       fields: Array<{
         fieldName: string;
         value: string;
-      }>
-    }>
+      }>;
+    }>;
   }) {
     type Response = ResultOf<typeof UpdateCategoryTranslationsDocument>;
-    
+
     const variables = createUpdateCategoryTranslationsVariables(params);
-    
+
     const response = await this.request<Response>(
       { query: print(UpdateCategoryTranslationsDocument) },
       variables
@@ -1101,7 +1241,11 @@ export class GraphQLClient {
 
     if (response.data?.translation?.updateTranslations?.errors?.length) {
       const errors = response.data.translation.updateTranslations.errors;
-      throw new Error(`Failed to update category translations: ${errors.map(e => e.message).join(', ')}`);
+      throw new Error(
+        `Failed to update category translations: ${errors
+          .map((e) => e.message)
+          .join(", ")}`
+      );
     }
 
     return response.data;
@@ -1112,13 +1256,13 @@ export class GraphQLClient {
     locale: string;
     categories: Array<{
       categoryId: number;
-      fields: string[]
-    }>
+      fields: string[];
+    }>;
   }) {
     type Response = ResultOf<typeof DeleteCategoryTranslationsDocument>;
-    
+
     const variables = createDeleteCategoryTranslationsVariables(params);
-    
+
     const response = await this.request<Response>(
       { query: print(DeleteCategoryTranslationsDocument) },
       variables
@@ -1126,7 +1270,11 @@ export class GraphQLClient {
 
     if (response.data?.translation?.deleteTranslations?.errors?.length) {
       const errors = response.data.translation.deleteTranslations.errors;
-      throw new Error(`Failed to delete category translations: ${errors.map(e => e.message).join(', ')}`);
+      throw new Error(
+        `Failed to delete category translations: ${errors
+          .map((e) => e.message)
+          .join(", ")}`
+      );
     }
 
     return response.data;
