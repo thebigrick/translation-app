@@ -149,7 +149,8 @@
       },
       "resourceTypes": {
         "products": "Products",
-        "categories": "Categories"
+        "categories": "Categories",
+        "sharedModifiers": "Shared Modifiers"
       },
       "status_pending": "Pending",
       "status_processing": "Processing",

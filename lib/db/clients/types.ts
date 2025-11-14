@@ -39,7 +39,7 @@ export interface DatabaseOperations {
   createTranslationJob(data: {
     storeHash: string;
     jobType: 'import' | 'export';
-    resourceType?: 'products' | 'categories';
+    resourceType?: 'products' | 'categories' | 'shared-modifiers';
     channelId: number;
     locale: string;
     fileUrl?: string;

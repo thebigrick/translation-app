@@ -149,7 +149,8 @@
       },
       "resourceTypes": {
         "products": "Prodotti",
-        "categories": "Categorie"
+        "categories": "Categorie",
+        "sharedModifiers": "Modificatori Condivisi"
       },
       "title": "Lavori di traduzione",
       "selectChannel": "Seleziona canale",

@@ -46,6 +46,12 @@ import {
   createUpdateCategoryTranslationsVariables,
   createDeleteCategoryTranslationsVariables,
 } from "./queries/category.tada";
+import {
+  GetSharedProductModifiersDocument,
+  SetSharedProductModifiersInformationDocument,
+  createGetSharedProductModifiersVariables,
+  createSetSharedProductModifiersVariables,
+} from "./queries/shared-modifiers.tada";
 import { graphql } from "./graphql";
 import type { ResultOf, VariablesOf } from "./graphql";
 import type { GraphQLResponse } from "./types/graphql";
@@ -1278,5 +1284,63 @@ export class GraphQLClient {
     }
 
     return response.data;
+  }
+
+  // Shared Product Modifiers Methods
+  async getSharedProductModifiers(params: {
+    channelId: number;
+    locale: string;
+    first?: number;
+    after?: string | null;
+    ids?: string[];
+  }) {
+    type Response = ResultOf<typeof GetSharedProductModifiersDocument>;
+    type ModifiersType = NonNullable<
+      Response["store"]
+    >["sharedProductModifiers"];
+
+    const variables = createGetSharedProductModifiersVariables(params);
+
+    const response = await this.request<Response>(
+      { query: print(GetSharedProductModifiersDocument) },
+      variables
+    );
+
+    if (!response.data?.store?.sharedProductModifiers) {
+      throw new Error("Failed to get shared product modifiers");
+    }
+
+    return response.data.store.sharedProductModifiers;
+  }
+
+  async setSharedProductModifiersInformation(params: {
+    channelId: number;
+    locale: string;
+    modifiers: Array<{
+      modifierId: string;
+      type: string;
+      data: any;
+    }>;
+  }) {
+    type Response = ResultOf<
+      typeof SetSharedProductModifiersInformationDocument
+    >;
+
+    const variables = createSetSharedProductModifiersVariables(params);
+
+    const response = await this.request<Response>(
+      { query: print(SetSharedProductModifiersInformationDocument) },
+      variables
+    );
+
+    if (
+      !response.data?.sharedProductModifiers
+        ?.setSharedProductModifiersInformation
+    ) {
+      throw new Error("Failed to set shared product modifiers information");
+    }
+
+    return response.data.sharedProductModifiers
+      .setSharedProductModifiersInformation;
   }
 }

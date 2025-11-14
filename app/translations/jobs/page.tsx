@@ -41,7 +41,7 @@ type TranslationJob = {
   id: number;
   status: "pending" | "processing" | "completed" | "failed";
   jobType: "import" | "export";
-  resourceType: "products" | "categories";
+  resourceType: "products" | "categories" | "shared-modifiers";
   fileUrl?: string;
   channelId: number;
   locale: string;
@@ -100,7 +100,7 @@ function TranslationsJobsContent() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(20);
   const [csvError, setCsvError] = useState<string | null>(null);
-  const [selectedResourceType, setSelectedResourceType] = useState<"products" | "categories">("products");
+  const [selectedResourceType, setSelectedResourceType] = useState<"products" | "categories" | "shared-modifiers">("products");
 
   const {
     channels,
@@ -651,9 +651,10 @@ function TranslationsJobsContent() {
                   label={t("modals.resourceType")}
                   items={[
                     { value: "products", label: t("resourceTypes.products") },
-                    { value: "categories", label: t("resourceTypes.categories") }
+                    { value: "categories", label: t("resourceTypes.categories") },
+                    { value: "shared-modifiers", label: t("resourceTypes.sharedModifiers") }
                   ]}
-                  onChange={(value) => setSelectedResourceType(value as "products" | "categories")}
+                  onChange={(value) => setSelectedResourceType(value as "products" | "categories" | "shared-modifiers")}
                   value={selectedResourceType}
                 />
               </FlexItem>
@@ -716,9 +717,10 @@ function TranslationsJobsContent() {
                   label={t("modals.resourceType")}
                   items={[
                     { value: "products", label: t("resourceTypes.products") },
-                    { value: "categories", label: t("resourceTypes.categories") }
+                    { value: "categories", label: t("resourceTypes.categories") },
+                    { value: "shared-modifiers", label: t("resourceTypes.sharedModifiers") }
                   ]}
-                  onChange={(value) => setSelectedResourceType(value as "products" | "categories")}
+                  onChange={(value) => setSelectedResourceType(value as "products" | "categories" | "shared-modifiers")}
                   value={selectedResourceType}
                 />
               </FlexItem>

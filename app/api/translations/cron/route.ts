@@ -30,6 +30,13 @@ import {
   generateCategoryCSVHeaders,
   formatCategoryDataForCSV,
 } from "@/lib/utils/category-translation-helpers";
+import {
+  SharedModifierTranslationRecord,
+  validateCSVRecord,
+  prepareSharedModifierTranslationData,
+  generateSharedModifierCSVHeaders,
+  formatSharedModifierForCSV,
+} from "@/lib/utils/shared-modifier-helpers";
 
 // CSV record type
 interface TranslationRecord {
@@ -256,15 +263,27 @@ async function parseCSV<T>(text: string): Promise<T[]> {
       escapeChar: '"',
       transformHeader: (header) => header.trim(),
       transform: (value: string, field: string) => {
+        const trimmed = value.trim();
+
         // Transform ID fields to number
-        if (field === "productId" || field === "categoryId") {
-          const parsed = parseInt(value.trim(), 10);
+        if (
+          field === "productId" ||
+          field === "categoryId" ||
+          field === "modifierId" ||
+          field === "valueId"
+        ) {
+          if (trimmed === "") {
+            return undefined;
+          }
+
+          const parsed = parseInt(trimmed, 10);
           if (isNaN(parsed)) {
-            throw new Error(`Invalid ID in CSV: ${value}`);
+            throw new Error(`Invalid ID in CSV for field ${field}: ${value}`);
           }
           return parsed;
         }
-        return value.trim();
+
+        return trimmed;
       },
       complete: (results: ParseResult<T>) => {
         if (results.errors.length > 0) {
@@ -374,6 +393,8 @@ const CONFIG = {
   PRODUCTS_PER_PAGE: Number(process.env.TRANSLATION_PRODUCTS_PER_PAGE) || 100,
   CATEGORIES_PER_PAGE:
     Number(process.env.TRANSLATION_CATEGORIES_PER_PAGE) || 50,
+  SHARED_MODIFIERS_PER_PAGE:
+    Number(process.env.TRANSLATION_SHARED_MODIFIERS_PER_PAGE) || 50,
 
   // Batch processing settings
   IMPORT_BATCH_SIZE: Number(process.env.TRANSLATION_IMPORT_BATCH_SIZE) || 3,
@@ -1469,6 +1490,375 @@ async function processCategoryExportJob(
   }
 }
 
+// Process a shared modifiers import job
+async function processSharedModifiersImportJob(
+  job: TranslationJob,
+  graphqlClient: any
+) {
+  console.log(
+    `[Shared Modifiers Import] Starting import job ${job.id} for channel ${job.channelId} and locale ${job.locale}`
+  );
+
+  try {
+    if (!job.fileUrl) {
+      throw new Error("No file URL provided for import job");
+    }
+
+    // Fetch CSV file
+    console.log(`[Shared Modifiers Import] Fetching CSV from ${job.fileUrl}`);
+    const response = await fetch(job.fileUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch CSV file: ${response.statusText}`);
+    }
+
+    const csvContent = await response.text();
+    console.log("[Shared Modifiers Import] Parsing CSV content");
+    console.log(
+      "[Shared Modifiers Import] CSV preview:",
+      csvContent.substring(0, 500)
+    );
+    const records = await parseCSV<SharedModifierTranslationRecord>(csvContent);
+    console.log(
+      `[Shared Modifiers Import] Found ${records.length} records to import`
+    );
+    console.log(
+      "[Shared Modifiers Import] First 3 records:",
+      JSON.stringify(records.slice(0, 3), null, 2)
+    );
+
+    // Validate all records first
+    const allErrors: string[] = [];
+    records.forEach((record, index) => {
+      const errors = validateCSVRecord(record, index + 2, job.locale);
+      allErrors.push(...errors);
+    });
+
+    if (allErrors.length > 0) {
+      throw new Error(`CSV validation failed:\n${allErrors.join("\n")}`);
+    }
+
+    // Group records by modifierId
+    const modifierGroups = new Map<number, SharedModifierTranslationRecord[]>();
+    records.forEach((record) => {
+      if (!modifierGroups.has(record.modifierId)) {
+        modifierGroups.set(record.modifierId, []);
+      }
+      modifierGroups.get(record.modifierId)!.push(record);
+    });
+
+    console.log(
+      `[Shared Modifiers Import] Grouped into ${modifierGroups.size} modifiers`
+    );
+
+    // Fetch modifier types for all modifiers in the CSV
+    console.log("[Shared Modifiers Import] Fetching modifier types from API");
+    const modifierIdsNeeded = Array.from(modifierGroups.keys());
+
+    console.log(
+      "[Shared Modifiers Import] Need types for modifier IDs:",
+      JSON.stringify(modifierIdsNeeded)
+    );
+
+    const modifierTypesMap = new Map<number, string>();
+
+    // Fetch all modifiers (we'll filter to only the ones we need)
+    // Note: Not using 'ids' filter because it may not work as expected
+    const typesResult = await graphqlClient.getSharedProductModifiers({
+      channelId: job.channelId,
+      locale: job.locale,
+      first: 50,
+    });
+
+    console.log(
+      "[Shared Modifiers Import] Query returned:",
+      typesResult.edges?.length || 0,
+      "modifiers"
+    );
+
+    typesResult.edges?.forEach((edge: any) => {
+      const numericId = parseInt(edge.node.id.split("/").pop() || "0", 10);
+
+      // Only map the ones we need
+      if (modifierIdsNeeded.includes(numericId)) {
+        console.log(
+          `[Shared Modifiers Import] Found needed modifier: ${edge.node.id} -> ${numericId} -> ${edge.node.__typename}`
+        );
+        modifierTypesMap.set(numericId, edge.node.__typename);
+      }
+    });
+
+    console.log(
+      `[Shared Modifiers Import] Found types for ${modifierTypesMap.size} of ${modifierIdsNeeded.length} modifiers`
+    );
+    console.log(
+      "[Shared Modifiers Import] Types map:",
+      JSON.stringify(Array.from(modifierTypesMap.entries()))
+    );
+
+    // Process modifiers in batches
+    const modifierBatches: any[] = [];
+    const batchSize = 10;
+
+    modifierGroups.forEach((groupRecords, modifierId) => {
+      const modifierType = modifierTypesMap.get(modifierId);
+      if (!modifierType) {
+        console.warn(
+          `[Shared Modifiers Import] Skipping modifier ${modifierId}: type not found`
+        );
+        return;
+      }
+
+      const modifierData = prepareSharedModifierTranslationData(
+        groupRecords,
+        job.locale,
+        modifierType,
+        modifierId
+      );
+
+      if (modifierData) {
+        modifierBatches.push(modifierData);
+      }
+    });
+
+    console.log(
+      `[Shared Modifiers Import] Prepared ${modifierBatches.length} modifiers for update`
+    );
+
+    // Update in batches
+    for (let i = 0; i < modifierBatches.length; i += batchSize) {
+      const batch = modifierBatches.slice(i, i + batchSize);
+
+      try {
+        console.log(
+          `[Shared Modifiers Import] Processing batch ${
+            Math.floor(i / batchSize) + 1
+          } of ${Math.ceil(modifierBatches.length / batchSize)}`
+        );
+
+        // DEBUG: Log the mutation payload
+        const mutationInput = {
+          channelId: job.channelId,
+          locale: job.locale,
+          modifiers: batch,
+        };
+        console.log(
+          "[Shared Modifiers Import] Mutation payload:",
+          JSON.stringify(mutationInput, null, 2)
+        );
+
+        console.log(
+          "[Shared Modifiers Import] Calling setSharedProductModifiersInformation..."
+        );
+
+        const result = await graphqlClient.setSharedProductModifiersInformation(
+          mutationInput
+        );
+
+        // DEBUG: Log the mutation result
+        console.log(
+          "[Shared Modifiers Import] Mutation result:",
+          JSON.stringify(result, null, 2)
+        );
+
+        console.log(
+          `[Shared Modifiers Import] Successfully updated ${batch.length} modifiers`
+        );
+      } catch (error) {
+        console.error(`[Shared Modifiers Import] Error updating batch:`, error);
+        const errorWithResponse = error as Error & {
+          response?: any;
+          errors?: any;
+        };
+        // Log the error to the database
+        await logTranslationError({
+          jobId: job.id,
+          entityId: 0,
+          lineNumber: i + 1,
+          errorType: "api_error",
+          errorMessage: errorWithResponse.message,
+          rawData: JSON.stringify({
+            batch,
+            response: errorWithResponse.errors || errorWithResponse.response,
+          }),
+        });
+        // Continue with next batch
+      }
+
+      // Add a small delay between batches for rate limiting
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    console.log(
+      `[Shared Modifiers Import] Job ${job.id} completed successfully`
+    );
+  } catch (error) {
+    console.error("[Shared Modifiers Import] Job failed:", error);
+    throw error;
+  }
+}
+
+// Process a shared modifiers export job
+async function processSharedModifiersExportJob(
+  job: TranslationJob,
+  graphqlClient: any,
+  restClient: BigCommerceRestClient
+) {
+  console.log(
+    `[Shared Modifiers Export] Starting export job ${job.id} for channel ${job.channelId} and locale ${job.locale}`
+  );
+
+  try {
+    // Get channel details first
+    console.log(
+      `[Shared Modifiers Export] Fetching channel details for channel ${job.channelId}`
+    );
+    const channelResponse = await restClient.getChannel(job.channelId);
+    const channelName =
+      channelResponse.data?.name || `channel-${job.channelId}`;
+
+    // Get channel locales to determine default locale
+    console.log(
+      `[Shared Modifiers Export] Fetching channel locales for channel ${job.channelId}`
+    );
+    const { data: localesData } = await restClient.getChannelLocales(
+      job.channelId
+    );
+    const defaultLocale =
+      localesData.find((locale) => locale.is_default)?.code ||
+      fallbackLocale.code;
+    console.log(
+      `[Shared Modifiers Export] Using default locale: ${defaultLocale}`
+    );
+
+    // Get shared modifiers with pagination
+    console.log(
+      `[Shared Modifiers Export] Fetching shared modifiers for channel ${job.channelId} and locale ${job.locale}`
+    );
+    const modifierEdges: any[] = [];
+    let cursor: string | undefined;
+    let pageNumber = 1;
+
+    while (true) {
+      const modifiersPage = await graphqlClient.getSharedProductModifiers({
+        channelId: job.channelId,
+        locale: job.locale,
+        first: CONFIG.SHARED_MODIFIERS_PER_PAGE,
+        after: cursor,
+      });
+
+      const edges = modifiersPage.edges || [];
+      console.log(
+        `[Shared Modifiers Export] Page ${pageNumber} returned ${edges.length} modifiers`
+      );
+      modifierEdges.push(...edges);
+
+      const pageInfo = modifiersPage.pageInfo;
+      if (pageInfo?.hasNextPage && pageInfo.endCursor) {
+        cursor = pageInfo.endCursor;
+        pageNumber += 1;
+        console.log(
+          `[Shared Modifiers Export] Waiting ${CONFIG.MIN_DELAY_BETWEEN_PAGES}ms before fetching next page`
+        );
+        await new Promise((resolve) =>
+          setTimeout(resolve, CONFIG.MIN_DELAY_BETWEEN_PAGES)
+        );
+      } else {
+        break;
+      }
+    }
+
+    console.log(
+      `[Shared Modifiers Export] Found ${modifierEdges.length} shared modifiers`
+    );
+
+    if (!modifierEdges.length) {
+      throw new Error("No shared modifiers found for export");
+    }
+
+    // Format modifiers for CSV (each modifier can produce multiple rows)
+    const allRecords: any[] = [];
+    modifierEdges.forEach((edge: any) => {
+      const records = formatSharedModifierForCSV(
+        edge.node,
+        defaultLocale,
+        job.locale
+      );
+      allRecords.push(...records);
+    });
+
+    console.log(
+      `[Shared Modifiers Export] Creating CSV with ${allRecords.length} rows`
+    );
+
+    // Generate CSV content
+    const headers = generateSharedModifierCSVHeaders(defaultLocale, job.locale);
+    const csvConfig: UnparseConfig = {
+      quotes: true,
+      quoteChar: '"',
+      escapeChar: '"',
+      delimiter: ",",
+      header: true,
+      newline: "\n",
+      skipEmptyLines: true,
+    };
+
+    // Format records for CSV
+    const csvData = allRecords.map((record: any) => {
+      const row: Record<string, any> = {};
+      headers.forEach((header) => {
+        const value = record[header];
+        row[header] = value === undefined || value === null ? "" : value;
+      });
+      return row;
+    });
+
+    const csvContent = Papa.unparse(
+      {
+        fields: headers,
+        data: csvData,
+      },
+      csvConfig
+    );
+
+    // Upload to blob storage with unique filename including channel name
+    console.log("[Shared Modifiers Export] Uploading CSV to blob storage");
+    const uniqueFilename = generateUniqueExportFilename(
+      job.id,
+      job.storeHash,
+      job.locale,
+      channelName,
+      "shared-modifiers"
+    );
+    const { url } = await put(uniqueFilename, csvContent, {
+      access: "public",
+      contentType: "text/csv",
+      addRandomSuffix: false,
+    });
+
+    console.log(`[Shared Modifiers Export] Upload complete. File URL: ${url}`);
+    return url;
+  } catch (error) {
+    console.error(
+      "[Shared Modifiers Export] Job failed:",
+      JSON.stringify(error, null, 2)
+    );
+    // Log the error to the database
+    const errorWithResponse = error as Error & { response?: any };
+    await logTranslationError({
+      jobId: job.id,
+      entityId: 0,
+      lineNumber: 0,
+      errorType: "export_error",
+      errorMessage: errorWithResponse.message,
+      rawData: JSON.stringify({
+        jobId: job.id,
+        response: errorWithResponse.response,
+      }),
+    });
+    throw error;
+  }
+}
+
 // Remove POST handler and keep only GET handler
 export async function GET(request: NextRequest) {
   try {
@@ -1505,6 +1895,8 @@ export async function GET(request: NextRequest) {
         if (job.jobType === "import") {
           if (job.resourceType === "categories") {
             await processCategoryImportJob(job, graphqlClient);
+          } else if (job.resourceType === "shared-modifiers") {
+            await processSharedModifiersImportJob(job, graphqlClient);
           } else {
             await processImportJob(job, graphqlClient);
           }
@@ -1512,6 +1904,12 @@ export async function GET(request: NextRequest) {
           let fileUrl;
           if (job.resourceType === "categories") {
             fileUrl = await processCategoryExportJob(
+              job,
+              graphqlClient,
+              restClient
+            );
+          } else if (job.resourceType === "shared-modifiers") {
+            fileUrl = await processSharedModifiersExportJob(
               job,
               graphqlClient,
               restClient
