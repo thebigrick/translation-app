@@ -283,6 +283,7 @@ function transformGraphQLModifiersDataToLocaleData(
     acc[modifierId] = {
       __typename: modifierType,
       displayName: localeModifier?.displayName || "",
+      isShared: edge.node.isShared || false,
     };
 
     // Handle type-specific fields
@@ -326,6 +327,9 @@ function transformGraphQLModifiersDataToLocaleData(
  * @returns {Object} An object containing:
  *   - modifiers: Array of transformed modifiers with their IDs, display names, and non-empty values
  *   - removedValues: Array of modifiers and values to remove from overrides
+ * 
+ * NOTE: Shared modifiers (isShared: true) are filtered out and not included in the mutation.
+ * They are managed globally and should only be updated through dedicated shared-modifier mutations.
  */
 function transformPostedModifierDataToGraphQLSchema(modifierData: any) {
   if (!modifierData.modifiers) return { modifiers: [], removedValues: [] };
@@ -333,6 +337,8 @@ function transformPostedModifierDataToGraphQLSchema(modifierData: any) {
   const removedValues: any[] = [];
   
   const modifiers = Object.entries(modifierData.modifiers)
+    // Filter out shared modifiers - they should not be updated via product mutation
+    .filter(([_, modifierDetails]: [string, any]) => !modifierDetails.isShared)
     .map(([modifierId, modifierDetails]: [string, any]) => {
       // Track empty values
       const emptyValueIds: string[] = [];
@@ -694,6 +700,7 @@ function transformGraphQLModifiersResponse(modifiersData: any) {
     acc[modifierId] = {
       __typename: modifierType,
       displayName: localeData?.displayName || "",
+      isShared: edge.node.isShared || false,
     };
 
     // Handle type-specific fields
@@ -818,6 +825,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ pid: 
             id: edge.node?.id,
             __typename: edge.node?.__typename,
             displayName: edge.node?.displayName,
+            isShared: edge.node?.isShared || false,
             values: (edge.node?.values || []).map((value: any) => ({
               id: value?.id,
               label: value?.label,

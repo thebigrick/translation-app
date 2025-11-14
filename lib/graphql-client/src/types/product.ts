@@ -24,6 +24,7 @@ export interface ProductCustomField {
 export interface ProductModifierBase {
   displayName?: string;
   __typename?: string;
+  isShared?: boolean;
 }
 
 export interface ProductModifierWithValues extends ProductModifierBase {

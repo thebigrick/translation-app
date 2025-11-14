@@ -82,6 +82,7 @@ interface ProductModifier {
   displayName: string;
   values?: ProductModifierValue[];
   isRequired?: boolean;
+  isShared?: boolean;
   checkedByDefault?: boolean;
   fieldValue?: string;
   defaultValue?: string;
@@ -132,6 +133,8 @@ interface FormModifier {
   fieldValue?: string;
   defaultValue?: string;
   defaultValueFloat?: string;
+  __typename?: string;
+  isShared?: boolean;
 }
 
 interface FormFields extends ProductFields {

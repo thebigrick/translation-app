@@ -2,7 +2,7 @@
 
 import React from "react";
 import { useTranslations } from 'next-intl';
-import { Box, Grid, GridItem, FormGroup, Input, Textarea } from "@bigcommerce/big-design";
+import { Box, Grid, GridItem, FormGroup, Input, Textarea, Badge, Text } from "@bigcommerce/big-design";
 import { ReceiptIcon } from "@bigcommerce/big-design-icons";
 import SectionHeader from "./section-header";
 
@@ -17,6 +17,7 @@ interface ProductModifier {
   displayName: string;
   values?: ProductModifierValue[];
   isRequired?: boolean;
+  isShared?: boolean;
   checkedByDefault?: boolean;
   fieldValue?: string;
   defaultValue?: string;
@@ -33,6 +34,8 @@ interface FormModifier {
   fieldValue?: string;
   defaultValue?: string;
   defaultValueFloat?: string;
+  __typename?: string;
+  isShared?: boolean;
 }
 
 interface ProductModifiersProps {
@@ -61,13 +64,22 @@ const ProductModifiers: React.FC<ProductModifiersProps> = ({
   return (
     <Box paddingBottom="xSmall">
       <SectionHeader icon={ReceiptIcon} title={t('modifiers.title')} />
-      {modifiers.map((modifier) => (
+      {modifiers.map((modifier) => {
+        const isShared = modifier.node.isShared || false;
+        
+        return (
         <Box
           key={modifier.node.id}
           marginBottom="medium"
           borderLeft="box"
           paddingLeft="small"
+          backgroundColor={isShared ? "secondary10" : undefined}
         >
+          {isShared && (
+            <Box paddingBottom="xSmall">
+              <Badge label="Shared Modifier (managed globally)" variant="secondary" />
+            </Box>
+          )}
           <Grid
             gridColumns={{
               mobile: "repeat(1, 1fr)",
@@ -95,6 +107,8 @@ const ProductModifiers: React.FC<ProductModifiersProps> = ({
                     name={`modifier_${modifier.node.id}`}
                     value={formModifiers?.[modifier.node.id]?.displayName || ""}
                     onChange={onChange}
+                    readOnly={isShared}
+                    disabled={isShared}
                   />
                 </FormGroup>
               </GridItem>
@@ -130,6 +144,8 @@ const ProductModifiers: React.FC<ProductModifiersProps> = ({
                       name={`modifierValue_${modifier.node.id}:${value.id}`}
                       value={formModifiers?.[modifier.node.id]?.values?.[value.id] || ""}
                       onChange={onChange}
+                      readOnly={isShared}
+                      disabled={isShared}
                     />
                   </FormGroup>
                 </GridItem>
@@ -166,6 +182,8 @@ const ProductModifiers: React.FC<ProductModifiersProps> = ({
                       name={`modifierField_${modifier.node.id}`}
                       value={formModifiers?.[modifier.node.id]?.fieldValue || ""}
                       onChange={onChange}
+                      readOnly={isShared}
+                      disabled={isShared}
                     />
                   </FormGroup>
                 </GridItem>
@@ -215,6 +233,8 @@ const ProductModifiers: React.FC<ProductModifiersProps> = ({
                         value={formModifiers?.[modifier.node.id]?.defaultValue || ""}
                         onChange={onChange}
                         rows={3}
+                        readOnly={isShared}
+                        disabled={isShared}
                       />
                     ) : (
                       <Input
@@ -222,6 +242,8 @@ const ProductModifiers: React.FC<ProductModifiersProps> = ({
                         name={`modifierDefaultValue_${modifier.node.id}`}
                         value={formModifiers?.[modifier.node.id]?.defaultValue || ""}
                         onChange={onChange}
+                        readOnly={isShared}
+                        disabled={isShared}
                       />
                     )}
                   </FormGroup>
@@ -261,6 +283,8 @@ const ProductModifiers: React.FC<ProductModifiersProps> = ({
                       name={`modifierDefaultValueFloat_${modifier.node.id}`}
                       value={formModifiers?.[modifier.node.id]?.defaultValueFloat || ""}
                       onChange={onChange}
+                      readOnly={isShared}
+                      disabled={isShared}
                     />
                   </FormGroup>
                 </GridItem>
@@ -268,7 +292,8 @@ const ProductModifiers: React.FC<ProductModifiersProps> = ({
             </Grid>
           )}
         </Box>
-      ))}
+        );
+      })}
     </Box>
   );
 };
