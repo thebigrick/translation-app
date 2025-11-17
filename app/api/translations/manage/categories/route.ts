@@ -48,11 +48,18 @@ export async function GET(request: NextRequest) {
     });
 
     // Transform data
-    const categories = (result.edges || []).map((edge: any) => ({
-      id: parseInt(edge.node.id.split("/").pop() || "0", 10),
-      name: edge.node.name,
-      translation: edge.node.overridesForLocale?.name || "",
-    }));
+    // Note: Category translations API returns resourceId (e.g. "bc/store/category/123")
+    // and fields array with fieldName, original, and translation
+    const categories = (result.edges || []).map((edge: any) => {
+      const categoryId = edge.node.resourceId?.split("/").pop() || "0";
+      const nameField = edge.node.fields?.find((f: any) => f.fieldName === "name");
+      
+      return {
+        id: parseInt(categoryId, 10),
+        name: nameField?.original || "",
+        translation: nameField?.translation || "",
+      };
+    });
 
     console.log('[Categories GET] Returning categories:', categories.length);
     console.log('[Categories GET] Returning categories:', categories.length);
