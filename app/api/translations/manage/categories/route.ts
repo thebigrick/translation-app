@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
     const params = {
       channelId: Number(channelId),
       locale,
-      first: 250,
+      first: 50,
     };
 
     console.log('[Categories GET] Request params:', params);

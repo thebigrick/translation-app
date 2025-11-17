@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
     const result = await graphqlClient.getSharedProductOptions({
       channelId: Number(channelId),
       locale,
-      first: 250,
+      first: 50,
     });
 
     console.log('[Shared Options GET] Result:', { 
