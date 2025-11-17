@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Box,
   Table,
@@ -56,6 +56,7 @@ export default function CategoriesTable({
       }
 
       const data = await response.json();
+      console.log('[Categories Table] Fetched data:', data);
       setCategories(data);
     } catch (err: any) {
       setError(err.message || "Failed to load categories");
@@ -70,15 +71,15 @@ export default function CategoriesTable({
     }
   }, [channelId, locale, fetchCategories]);
 
-  const handleTranslationChange = (categoryId: number, value: string) => {
+  const handleTranslationChange = useCallback((categoryId: number, value: string) => {
     setEditingValues(prev => {
       const newValues = { ...prev };
       newValues[categoryId] = value;
       return newValues;
     });
-  };
+  }, []);
 
-  const handleSave = async (categoryId: number) => {
+  const handleSave = useCallback(async (categoryId: number) => {
     setIsSaving(categoryId);
     setError(null);
     setSuccessMessage(null);
@@ -125,13 +126,16 @@ export default function CategoriesTable({
     } finally {
       setIsSaving(null);
     }
-  };
+  }, [context, channelId, locale, editingValues, categories]);
 
-  const filteredCategories = categories.filter(cat =>
-    cat.name.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredCategories = useMemo(
+    () => categories.filter(cat =>
+      cat.name.toLowerCase().includes(searchTerm.toLowerCase())
+    ),
+    [categories, searchTerm]
   );
 
-  const columns = [
+  const columns = useMemo(() => [
     {
       header: "ID",
       hash: "id",
@@ -174,7 +178,7 @@ export default function CategoriesTable({
         );
       },
     },
-  ];
+  ], [locale, editingValues, isSaving, handleTranslationChange, handleSave]);
 
   if (isLoading) {
     return (

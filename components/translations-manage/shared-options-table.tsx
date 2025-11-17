@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Box,
   Table,
@@ -66,6 +66,7 @@ export default function SharedOptionsTable({
       }
 
       const data = await response.json();
+      console.log('[Shared Options Table] Fetched data:', data);
       setOptions(data);
     } catch (err: any) {
       setError(err.message || "Failed to load shared options");
@@ -80,11 +81,11 @@ export default function SharedOptionsTable({
     }
   }, [channelId, locale, fetchOptions]);
 
-  const handleTranslationChange = (key: string, value: string) => {
+  const handleTranslationChange = useCallback((key: string, value: string) => {
     setEditingValues(prev => ({ ...prev, [key]: value }));
-  };
+  }, []);
 
-  const handleSaveOption = async (optionId: string) => {
+  const handleSaveOption = useCallback(async (optionId: string) => {
     setIsSaving(optionId);
     setError(null);
     setSuccessMessage(null);
@@ -130,9 +131,9 @@ export default function SharedOptionsTable({
     } finally {
       setIsSaving(null);
     }
-  };
+  }, [context, channelId, locale, editingValues, options]);
 
-  const handleSaveValue = async (optionId: string, valueId: string) => {
+  const handleSaveValue = useCallback(async (optionId: string, valueId: string) => {
     const key = `${optionId}:${valueId}`;
     setIsSaving(key);
     setError(null);
@@ -187,9 +188,9 @@ export default function SharedOptionsTable({
     } finally {
       setIsSaving(null);
     }
-  };
+  }, [context, channelId, locale, editingValues, options]);
 
-  const toggleExpanded = (optionId: string) => {
+  const toggleExpanded = useCallback((optionId: string) => {
     setExpandedOptions(prev => {
       const newSet = new Set(prev);
       if (newSet.has(optionId)) {
@@ -199,13 +200,16 @@ export default function SharedOptionsTable({
       }
       return newSet;
     });
-  };
+  }, []);
 
-  const filteredOptions = options.filter(opt =>
-    opt.displayName.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredOptions = useMemo(
+    () => options.filter(opt =>
+      opt.displayName.toLowerCase().includes(searchTerm.toLowerCase())
+    ),
+    [options, searchTerm]
   );
 
-  const columns = [
+  const columns = useMemo(() => [
     {
       header: "",
       hash: "expand",
@@ -264,7 +268,7 @@ export default function SharedOptionsTable({
         );
       },
     },
-  ];
+  ], [defaultLocale, locale, editingValues, isSaving, handleTranslationChange, handleSaveOption, toggleExpanded, expandedOptions]);
 
   if (isLoading) {
     return (

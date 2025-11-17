@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Box,
   Table,
@@ -78,11 +78,11 @@ export default function SharedModifiersTable({
     }
   }, [channelId, locale, fetchModifiers]);
 
-  const handleTranslationChange = (key: string, value: string) => {
+  const handleTranslationChange = useCallback((key: string, value: string) => {
     setEditingValues(prev => ({ ...prev, [key]: value }));
-  };
+  }, []);
 
-  const handleSaveModifier = async (modifierId: string) => {
+  const handleSaveModifier = useCallback(async (modifierId: string) => {
     setIsSaving(modifierId);
     setError(null);
     setSuccessMessage(null);
@@ -128,9 +128,9 @@ export default function SharedModifiersTable({
     } finally {
       setIsSaving(null);
     }
-  };
+  }, [context, channelId, locale, editingValues, modifiers]);
 
-  const handleSaveValue = async (modifierId: string, valueId: string) => {
+  const handleSaveValue = useCallback(async (modifierId: string, valueId: string) => {
     const key = `${modifierId}:${valueId}`;
     setIsSaving(key);
     setError(null);
@@ -185,9 +185,9 @@ export default function SharedModifiersTable({
     } finally {
       setIsSaving(null);
     }
-  };
+  }, [context, channelId, locale, editingValues, modifiers]);
 
-  const toggleExpanded = (modifierId: string) => {
+  const toggleExpanded = useCallback((modifierId: string) => {
     setExpandedModifiers(prev => {
       const newSet = new Set(prev);
       if (newSet.has(modifierId)) {
@@ -197,13 +197,16 @@ export default function SharedModifiersTable({
       }
       return newSet;
     });
-  };
+  }, []);
 
-  const filteredModifiers = modifiers.filter(mod =>
-    mod.displayName.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredModifiers = useMemo(
+    () => modifiers.filter(mod =>
+      mod.displayName.toLowerCase().includes(searchTerm.toLowerCase())
+    ),
+    [modifiers, searchTerm]
   );
 
-  const columns = [
+  const columns = useMemo(() => [
     {
       header: "",
       hash: "expand",
@@ -262,7 +265,7 @@ export default function SharedModifiersTable({
         );
       },
     },
-  ];
+  ], [defaultLocale, locale, editingValues, isSaving, handleTranslationChange, handleSaveModifier, toggleExpanded, expandedModifiers]);
 
   if (isLoading) {
     return (
