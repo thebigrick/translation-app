@@ -157,6 +157,15 @@ function TranslationsManageContent() {
     content: l.title || l.code,
   }));
 
+  // Debug: log available locales
+  useEffect(() => {
+    if (availableLocales.length > 0) {
+      console.log('[Translations Manage] Available locales:', availableLocales);
+      console.log('[Translations Manage] Locale options:', localeOptions);
+      console.log('[Translations Manage] Selected locale:', selectedLocale);
+    }
+  }, [availableLocales, localeOptions, selectedLocale]);
+
   return (
     <Page
       header={
