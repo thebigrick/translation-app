@@ -28,10 +28,17 @@ export async function GET(request: NextRequest) {
 
     const graphqlClient = createGraphQLClient(accessToken, storeHash);
 
+    console.log('[Shared Options GET] Fetching with:', { channelId, locale });
+
     const result = await graphqlClient.getSharedProductOptions({
       channelId: Number(channelId),
       locale,
       first: 250,
+    });
+
+    console.log('[Shared Options GET] Result:', { 
+      edgesCount: result.edges?.length || 0,
+      hasPageInfo: !!result.pageInfo 
     });
 
     const options = (result.edges || []).map((edge: any) => ({
@@ -51,9 +58,15 @@ export async function GET(request: NextRequest) {
       }),
     }));
 
+    console.log('[Shared Options GET] Returning options:', options.length);
     return NextResponse.json(options);
   } catch (error: any) {
-    console.error("Error fetching shared options:", error);
+    console.error("[Shared Options GET] Error fetching shared options:", error);
+    console.error("[Shared Options GET] Error details:", {
+      message: error.message,
+      stack: error.stack,
+      response: error.response?.data
+    });
     return NextResponse.json(
       { error: error.message || "Failed to fetch shared options" },
       { status: 500 }

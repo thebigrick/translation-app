@@ -30,11 +30,17 @@ export async function GET(request: NextRequest) {
     // Create GraphQL client
     const graphqlClient = createGraphQLClient(accessToken, storeHash);
 
+    console.log('[Categories GET] Fetching with:', { channelId, locale });
+
     // Fetch categories
     const result = await graphqlClient.getCategoryTranslations({
       channelId: Number(channelId),
       locale,
       first: 250,
+    });
+
+    console.log('[Categories GET] Result:', { 
+      edgesCount: result.edges?.length || 0 
     });
 
     // Transform data
@@ -44,9 +50,14 @@ export async function GET(request: NextRequest) {
       translation: edge.node.overridesForLocale?.name || "",
     }));
 
+    console.log('[Categories GET] Returning categories:', categories.length);
     return NextResponse.json(categories);
   } catch (error: any) {
-    console.error("Error fetching categories:", error);
+    console.error("[Categories GET] Error fetching categories:", error);
+    console.error("[Categories GET] Error details:", {
+      message: error.message,
+      stack: error.stack,
+    });
     return NextResponse.json(
       { error: error.message || "Failed to fetch categories" },
       { status: 500 }

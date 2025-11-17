@@ -28,10 +28,16 @@ export async function GET(request: NextRequest) {
 
     const graphqlClient = createGraphQLClient(accessToken, storeHash);
 
+    console.log('[Shared Modifiers GET] Fetching with:', { channelId, locale });
+
     const result = await graphqlClient.getSharedProductModifiers({
       channelId: Number(channelId),
       locale,
       first: 250,
+    });
+
+    console.log('[Shared Modifiers GET] Result:', { 
+      edgesCount: result.edges?.length || 0 
     });
 
     const modifiers = (result.edges || []).map((edge: any) => ({
@@ -51,9 +57,14 @@ export async function GET(request: NextRequest) {
       }),
     }));
 
+    console.log('[Shared Modifiers GET] Returning modifiers:', modifiers.length);
     return NextResponse.json(modifiers);
   } catch (error: any) {
-    console.error("Error fetching shared modifiers:", error);
+    console.error("[Shared Modifiers GET] Error fetching shared modifiers:", error);
+    console.error("[Shared Modifiers GET] Error details:", {
+      message: error.message,
+      stack: error.stack,
+    });
     return NextResponse.json(
       { error: error.message || "Failed to fetch shared modifiers" },
       { status: 500 }
