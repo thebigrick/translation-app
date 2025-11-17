@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createGraphQLClient } from "@bigcommerce/translations-graphql-client";
-import { dbClient as db } from "@/lib/db";
+import { getSessionFromContext } from "@/lib/auth";
 
 // GET - Fetch categories with translations
 export async function GET(request: NextRequest) {
@@ -17,23 +17,15 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get store hash from context
-    const storeHash = context?.split("/")[1];
-    if (!storeHash) {
+    if (!context) {
       return NextResponse.json(
-        { error: "Invalid context" },
+        { error: "Context is required" },
         { status: 400 }
       );
     }
 
-    // Get access token
-    const accessToken = await db.getStoreToken(storeHash);
-    if (!accessToken) {
-      return NextResponse.json(
-        { error: "Store token not found" },
-        { status: 404 }
-      );
-    }
+    // Get session from context
+    const { accessToken, storeHash } = await getSessionFromContext(context);
 
     // Create GraphQL client
     const graphqlClient = createGraphQLClient(accessToken, storeHash);
@@ -78,23 +70,15 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    // Get store hash from context
-    const storeHash = context?.split("/")[1];
-    if (!storeHash) {
+    if (!context) {
       return NextResponse.json(
-        { error: "Invalid context" },
+        { error: "Context is required" },
         { status: 400 }
       );
     }
 
-    // Get access token
-    const accessToken = await db.getStoreToken(storeHash);
-    if (!accessToken) {
-      return NextResponse.json(
-        { error: "Store token not found" },
-        { status: 404 }
-      );
-    }
+    // Get session from context
+    const { accessToken, storeHash } = await getSessionFromContext(context);
 
     // Create GraphQL client
     const graphqlClient = createGraphQLClient(accessToken, storeHash);
