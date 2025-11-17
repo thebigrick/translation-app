@@ -80,6 +80,7 @@ function TranslationsManageContent() {
   };
 
   const handleLocaleChange = (value: string) => {
+    console.log('[Translations Manage] Locale changed to:', value);
     setSelectedLocale(value || "");
     localStorage.setItem("translations_manage_selected_locale", value);
   };
@@ -91,6 +92,8 @@ function TranslationsManageContent() {
         "translations_manage_selected_channel"
       );
       const savedLocale = localStorage.getItem("translations_manage_selected_locale");
+
+      console.log('[Translations Manage] Loading from localStorage:', { savedChannelId, savedLocale });
 
       // Find the saved channel if it exists in current channels
       const savedChannel = savedChannelId
@@ -105,6 +108,10 @@ function TranslationsManageContent() {
         )
       ) {
         // Use saved preferences if valid and not default locale
+        console.log('[Translations Manage] Using saved preferences:', { 
+          channelId: savedChannel.channel_id, 
+          locale: savedLocale 
+        });
         setSelectedChannel(savedChannel.channel_id);
         setSelectedLocale(savedLocale);
       } else {
@@ -114,6 +121,12 @@ function TranslationsManageContent() {
           (locale) => !locale.is_default
         );
         const newLocale = nonDefaultLocales[0]?.code || "";
+
+        console.log('[Translations Manage] Using defaults:', { 
+          channelId: firstChannel.channel_id, 
+          locale: newLocale,
+          allLocales: firstChannel.locales 
+        });
 
         setSelectedChannel(firstChannel.channel_id);
         setSelectedLocale(newLocale);
