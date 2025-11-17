@@ -17,7 +17,20 @@
     },
     "home": {
       "welcome": "Benvenuto al Centro Traduzioni",
-      "description": "Qui puoi gestire le traduzioni del tuo catalogo in più lingue."
+      "description": "Qui puoi gestire le traduzioni del tuo catalogo in più lingue.",
+      "quickActions": {
+        "title": "Azioni Rapide",
+        "manage": {
+          "title": "Gestisci Traduzioni",
+          "description": "Modifica le traduzioni direttamente nell'app senza file CSV",
+          "button": "Apri Editor"
+        },
+        "jobs": {
+          "title": "Lavori Import/Export",
+          "description": "Importa ed esporta traduzioni in blocco usando file CSV",
+          "button": "Visualizza Lavori"
+        }
+      }
     },
     "resources": {
       "title": "Risorse",
@@ -124,6 +137,20 @@
     }
   },
   "translations": {
+    "manage": {
+      "pageTitle": "Gestione Traduzioni",
+      "pageDescription": "Modifica le traduzioni direttamente senza file CSV",
+      "selectChannel": "Seleziona Canale",
+      "selectLocale": "Seleziona Lingua di Destinazione",
+      "tabs": {
+        "categories": "Categorie",
+        "sharedOptions": "Opzioni Condivise",
+        "sharedModifiers": "Modificatori Condivisi"
+      },
+      "navigation": {
+        "back": "Torna alla Home"
+      }
+    },
     "jobs": {
       "pageTitle": "Lavori di traduzione",
       "pageDescription": "Gestisci i dati linguistici per canali specifici esportando e importando traduzioni del catalogo in blocco. Supporta file CSV.",

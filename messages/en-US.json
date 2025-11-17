@@ -17,7 +17,20 @@
     },
     "home": {
       "welcome": "Welcome to the Translation Center",
-      "description": "Where you can manage translations of your catalog into multiple languages."
+      "description": "Where you can manage translations of your catalog into multiple languages.",
+      "quickActions": {
+        "title": "Quick Actions",
+        "manage": {
+          "title": "Manage Translations",
+          "description": "Edit translations directly in the app without CSV files",
+          "button": "Open Editor"
+        },
+        "jobs": {
+          "title": "Import/Export Jobs",
+          "description": "Bulk import and export translations using CSV files",
+          "button": "View Jobs"
+        }
+      }
     },
     "resources": {
       "title": "Resources",
@@ -124,6 +137,20 @@
     }
   },
   "translations": {
+    "manage": {
+      "pageTitle": "Manage Translations",
+      "pageDescription": "Edit translations directly without CSV files",
+      "selectChannel": "Select Channel",
+      "selectLocale": "Select Target Locale",
+      "tabs": {
+        "categories": "Categories",
+        "sharedOptions": "Shared Options",
+        "sharedModifiers": "Shared Modifiers"
+      },
+      "navigation": {
+        "back": "Back to Home"
+      }
+    },
     "jobs": {
       "pageTitle": "Translation Jobs",
       "pageDescription": "Manage locale data for specific channels by exporting and importing catalog translations in bulk. Supports CSV files.",
