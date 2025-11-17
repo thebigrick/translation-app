@@ -30,17 +30,21 @@ export async function GET(request: NextRequest) {
     // Create GraphQL client
     const graphqlClient = createGraphQLClient(accessToken, storeHash);
 
-    console.log('[Categories GET] Fetching with:', { channelId, locale });
-
-    // Fetch categories
-    const result = await graphqlClient.getCategoryTranslations({
+    const params = {
       channelId: Number(channelId),
       locale,
       first: 250,
-    });
+    };
+
+    console.log('[Categories GET] Request params:', params);
+
+    // Fetch categories
+    const result = await graphqlClient.getCategoryTranslations(params);
 
     console.log('[Categories GET] Result:', { 
-      edgesCount: result.edges?.length || 0 
+      edgesCount: result.edges?.length || 0,
+      hasEdges: !!result.edges,
+      fullResult: JSON.stringify(result, null, 2)
     });
 
     // Transform data
@@ -51,13 +55,23 @@ export async function GET(request: NextRequest) {
     }));
 
     console.log('[Categories GET] Returning categories:', categories.length);
+    console.log('[Categories GET] Returning categories:', categories.length);
     return NextResponse.json(categories);
   } catch (error: any) {
     console.error("[Categories GET] Error fetching categories:", error);
     console.error("[Categories GET] Error details:", {
       message: error.message,
       stack: error.stack,
+      response: error.response,
+      status: error.status,
+      errors: error.errors,
     });
+    
+    // Log the full error object
+    if (error.errors && Array.isArray(error.errors)) {
+      console.error("[Categories GET] GraphQL Errors:", JSON.stringify(error.errors, null, 2));
+    }
+    
     return NextResponse.json(
       { error: error.message || "Failed to fetch categories" },
       { status: 500 }
