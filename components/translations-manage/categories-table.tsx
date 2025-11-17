@@ -71,7 +71,11 @@ export default function CategoriesTable({
   }, [channelId, locale, fetchCategories]);
 
   const handleTranslationChange = (categoryId: number, value: string) => {
-    setEditingValues(prev => ({ ...prev, [categoryId]: value }));
+    setEditingValues(prev => {
+      const newValues = { ...prev };
+      newValues[categoryId] = value;
+      return newValues;
+    });
   };
 
   const handleSave = async (categoryId: number) => {
@@ -142,29 +146,33 @@ export default function CategoriesTable({
     {
       header: `Translation (${locale})`,
       hash: "translation",
-      render: (item: Category) => (
-        <Flex alignItems="center">
-          <FlexItem flexGrow={1}>
-            <Input
-              value={editingValues[item.id] ?? item.translation ?? ""}
-              onChange={(e) => handleTranslationChange(item.id, e.target.value)}
-              placeholder={`Enter ${locale} translation`}
-            />
-          </FlexItem>
-          <FlexItem marginLeft="small">
-            <Button
-              variant="secondary"
-              iconOnly={<CheckIcon />}
-              onClick={() => handleSave(item.id)}
-              disabled={
-                isSaving === item.id ||
-                (editingValues[item.id] ?? item.translation) === item.translation
-              }
-              isLoading={isSaving === item.id}
-            />
-          </FlexItem>
-        </Flex>
-      ),
+      render: (item: Category) => {
+        const currentValue = item.id in editingValues 
+          ? editingValues[item.id] 
+          : item.translation;
+        const hasChanges = item.id in editingValues && editingValues[item.id] !== item.translation;
+        
+        return (
+          <Flex alignItems="center">
+            <FlexItem flexGrow={1}>
+              <Input
+                value={currentValue}
+                onChange={(e) => handleTranslationChange(item.id, e.target.value)}
+                placeholder={`Enter ${locale} translation`}
+              />
+            </FlexItem>
+            <FlexItem marginLeft="small">
+              <Button
+                variant="secondary"
+                iconOnly={<CheckIcon />}
+                onClick={() => handleSave(item.id)}
+                disabled={isSaving === item.id || !hasChanges}
+                isLoading={isSaving === item.id}
+              />
+            </FlexItem>
+          </Flex>
+        );
+      },
     },
   ];
 

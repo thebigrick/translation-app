@@ -234,29 +234,33 @@ export default function SharedModifiersTable({
     {
       header: `Translation (${locale})`,
       hash: "translation",
-      render: (item: SharedModifier) => (
-        <Flex alignItems="center">
-          <FlexItem flexGrow={1}>
-            <Input
-              value={editingValues[item.id] ?? item.translation ?? ""}
-              onChange={(e) => handleTranslationChange(item.id, e.target.value)}
-              placeholder={`Enter ${locale} translation`}
-            />
-          </FlexItem>
-          <FlexItem marginLeft="small">
-            <Button
-              variant="secondary"
-              iconOnly={<CheckIcon />}
-              onClick={() => handleSaveModifier(item.id)}
-              disabled={
-                isSaving === item.id ||
-                (editingValues[item.id] ?? item.translation) === item.translation
-              }
-              isLoading={isSaving === item.id}
-            />
-          </FlexItem>
-        </Flex>
-      ),
+      render: (item: SharedModifier) => {
+        const currentValue = item.id in editingValues 
+          ? editingValues[item.id] 
+          : item.translation;
+        const hasChanges = item.id in editingValues && editingValues[item.id] !== item.translation;
+        
+        return (
+          <Flex alignItems="center">
+            <FlexItem flexGrow={1}>
+              <Input
+                value={currentValue}
+                onChange={(e) => handleTranslationChange(item.id, e.target.value)}
+                placeholder={`Enter ${locale} translation`}
+              />
+            </FlexItem>
+            <FlexItem marginLeft="small">
+              <Button
+                variant="secondary"
+                iconOnly={<CheckIcon />}
+                onClick={() => handleSaveModifier(item.id)}
+                disabled={isSaving === item.id || !hasChanges}
+                isLoading={isSaving === item.id}
+              />
+            </FlexItem>
+          </Flex>
+        );
+      },
     },
   ];
 
@@ -333,6 +337,11 @@ export default function SharedModifiersTable({
                   {modifier.values.map((value) => {
                     const key = `${modifier.id}:${value.id}`;
                     const numericValueId = value.id.split("/").pop();
+                    const currentValue = key in editingValues 
+                      ? editingValues[key] 
+                      : value.translation;
+                    const hasChanges = key in editingValues && editingValues[key] !== value.translation;
+                    
                     return (
                       <Flex
                         key={value.id}
@@ -347,7 +356,7 @@ export default function SharedModifiersTable({
                         </FlexItem>
                         <FlexItem flexGrow={1}>
                           <Input
-                            value={editingValues[key] ?? value.translation ?? ""}
+                            value={currentValue}
                             onChange={(e) =>
                               handleTranslationChange(key, e.target.value)
                             }
@@ -359,10 +368,7 @@ export default function SharedModifiersTable({
                             variant="secondary"
                             iconOnly={<CheckIcon />}
                             onClick={() => handleSaveValue(modifier.id, value.id)}
-                            disabled={
-                              isSaving === key ||
-                              (editingValues[key] ?? value.translation) === value.translation
-                            }
+                            disabled={isSaving === key || !hasChanges}
                             isLoading={isSaving === key}
                           />
                         </FlexItem>
