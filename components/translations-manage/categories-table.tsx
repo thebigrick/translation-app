@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Box,
   Table,
@@ -20,6 +20,11 @@ interface Category {
   name: string;
   translation: string;
 }
+
+type CategoryRow = Category & {
+  currentValue: string;
+  hasChanges: boolean;
+};
 
 interface CategoriesTableProps {
   context: string | null;
@@ -41,6 +46,11 @@ export default function CategoriesTable({
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [editingValues, setEditingValues] = useState<{ [key: number]: string }>({});
+  const editingValuesRef = useRef(editingValues);
+
+  useEffect(() => {
+    editingValuesRef.current = editingValues;
+  }, [editingValues]);
 
   const fetchCategories = useCallback(async () => {
     setIsLoading(true);
@@ -85,7 +95,7 @@ export default function CategoriesTable({
     setSuccessMessage(null);
 
     try {
-      const translation = editingValues[categoryId];
+      const translation = editingValuesRef.current[categoryId];
       
       const response = await fetch(
         `/api/translations/manage/categories?context=${context}`,
@@ -126,7 +136,7 @@ export default function CategoriesTable({
     } finally {
       setIsSaving(null);
     }
-  }, [context, channelId, locale, editingValues, categories]);
+  }, [context, channelId, locale]);
 
   const filteredCategories = useMemo(
     () => categories.filter(cat =>
@@ -135,32 +145,46 @@ export default function CategoriesTable({
     [categories, searchTerm]
   );
 
+  const tableItems = useMemo<CategoryRow[]>(
+    () =>
+      filteredCategories.map((cat) => {
+        const editingValue = editingValues[cat.id];
+        const currentValue =
+          editingValue !== undefined
+            ? editingValue
+            : cat.translation || "";
+        const hasChanges =
+          editingValue !== undefined && editingValue !== cat.translation;
+        return {
+          ...cat,
+          currentValue,
+          hasChanges,
+        };
+      }),
+    [filteredCategories, editingValues]
+  );
+
   const columns = useMemo(() => [
     {
       header: "ID",
       hash: "id",
-      render: (item: Category) => item.id,
+      render: (item: CategoryRow) => item.id,
       width: 80,
     },
     {
       header: `Name (${defaultLocale})`,
       hash: "name",
-      render: (item: Category) => item.name,
+      render: (item: CategoryRow) => item.name,
     },
     {
       header: `Translation (${locale})`,
       hash: "translation",
-      render: (item: Category) => {
-        const currentValue = item.id in editingValues 
-          ? editingValues[item.id] 
-          : item.translation;
-        const hasChanges = item.id in editingValues && editingValues[item.id] !== item.translation;
-        
+      render: (item: CategoryRow) => {
         return (
           <Flex alignItems="center">
             <FlexItem flexGrow={1}>
               <Input
-                value={currentValue}
+                value={item.currentValue}
                 onChange={(e) => handleTranslationChange(item.id, e.target.value)}
                 placeholder={`Enter ${locale} translation`}
               />
@@ -170,7 +194,7 @@ export default function CategoriesTable({
                 variant="secondary"
                 iconOnly={<CheckIcon />}
                 onClick={() => handleSave(item.id)}
-                disabled={isSaving === item.id || !hasChanges}
+                disabled={isSaving === item.id || !item.hasChanges}
                 isLoading={isSaving === item.id}
               />
             </FlexItem>
@@ -178,7 +202,7 @@ export default function CategoriesTable({
         );
       },
     },
-  ], [locale, editingValues, isSaving, handleTranslationChange, handleSave]);
+  ], [defaultLocale, locale, isSaving, handleTranslationChange, handleSave]);
 
   if (isLoading) {
     return (
@@ -233,9 +257,10 @@ export default function CategoriesTable({
       ) : (
         <Table
           columns={columns}
-          items={filteredCategories}
+          items={tableItems}
           stickyHeader
           itemName="Categories"
+          keyField="id"
         />
       )}
     </Box>

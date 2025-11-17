@@ -22,13 +22,13 @@
         "title": "Quick Actions",
         "manage": {
           "title": "Manage Translations",
-          "description": "Edit translations directly in the app without CSV files",
+          "description": "Edit translations directly in your admin panel",
           "button": "Open Editor"
         },
         "jobs": {
           "title": "Import/Export Jobs",
-          "description": "Bulk import and export translations using CSV files",
-          "button": "View Jobs"
+          "description": "Bulk import/export translations via CSV files",
+          "button": "Import/Export CSV"
         }
       }
     },
@@ -139,13 +139,18 @@
   "translations": {
     "manage": {
       "pageTitle": "Manage Translations",
-      "pageDescription": "Edit translations directly without CSV files",
+      "pageDescription": "Edit translations",
       "selectChannel": "Select Channel",
       "selectLocale": "Select Target Locale",
       "tabs": {
+        "products": "Products",
         "categories": "Categories",
         "sharedOptions": "Shared Options",
         "sharedModifiers": "Shared Modifiers"
+      },
+      "productsTab": {
+        "description": "Product translations can be edited from the product list. Open the list and click the three dots on a product row to access translation options.",
+        "button": "Go to Product List"
       },
       "navigation": {
         "back": "Back to Home"

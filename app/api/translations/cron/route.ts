@@ -1921,17 +1921,28 @@ async function processSharedOptionsImportJob(
       throw new Error(`CSV validation failed:\n${allErrors.join("\n")}`);
     }
 
-    // Group records by optionId (convert to number for proper grouping)
-    const optionGroups = new Map<number, SharedOptionTranslationRecord[]>();
+    // Group records by optionId (store as string key for easier matching)
+    const optionGroups = new Map<string, SharedOptionTranslationRecord[]>();
     records.forEach((record) => {
-      const numericOptionId = typeof record.optionId === 'string' 
-        ? parseInt(record.optionId, 10) 
-        : record.optionId;
-      
-      if (!optionGroups.has(numericOptionId)) {
-        optionGroups.set(numericOptionId, []);
+      const numericOptionId =
+        typeof record.optionId === "string"
+          ? parseInt(record.optionId, 10)
+          : record.optionId;
+
+      if (Number.isNaN(numericOptionId) || numericOptionId == null) {
+        console.warn(
+          "[Shared Options Import] Skipping record with invalid optionId:",
+          record.optionId
+        );
+        return;
       }
-      optionGroups.get(numericOptionId)!.push(record);
+
+      const optionKey = numericOptionId.toString();
+
+      if (!optionGroups.has(optionKey)) {
+        optionGroups.set(optionKey, []);
+      }
+      optionGroups.get(optionKey)!.push(record);
     });
 
     console.log(
@@ -1947,13 +1958,18 @@ async function processSharedOptionsImportJob(
       JSON.stringify(optionIdsNeeded)
     );
 
-    const optionTypesMap = new Map<number, string>();
+    const optionTypesMap = new Map<string, string>();
 
-    // Fetch all options (we'll filter to only the ones we need)
+    const optionGraphqlIds = optionIdsNeeded.map(
+      (id) => `bc/store/sharedProductOption/${id}`
+    );
+
+    // Fetch only the options we need
     const typesResult = await graphqlClient.getSharedProductOptions({
       channelId: job.channelId,
       locale: job.locale,
-      first: 50,
+      first: optionGraphqlIds.length || 50,
+      ids: optionGraphqlIds,
     });
 
     console.log(
@@ -1964,14 +1980,12 @@ async function processSharedOptionsImportJob(
 
     if (typesResult.edges) {
       typesResult.edges.forEach((edge: any) => {
-        const numericId = parseInt(edge.node.id.split("/").pop() || "0", 10);
-
-        // Only map the ones we need
-        if (optionIdsNeeded.includes(numericId)) {
+        const numericIdString = edge.node.id.split("/").pop() || "";
+        if (optionIdsNeeded.includes(numericIdString)) {
           console.log(
-            `[Shared Options Import] Found needed option: ${edge.node.id} -> ${numericId} -> ${edge.node.__typename}`
+            `[Shared Options Import] Found needed option: ${edge.node.id} -> ${numericIdString} -> ${edge.node.__typename}`
           );
-          optionTypesMap.set(numericId, edge.node.__typename);
+          optionTypesMap.set(numericIdString, edge.node.__typename);
         }
       });
     }
@@ -2001,7 +2015,7 @@ async function processSharedOptionsImportJob(
         groupRecords,
         job.locale,
         optionType,
-        optionId
+        Number(optionId)
       );
 
       if (optionData) {

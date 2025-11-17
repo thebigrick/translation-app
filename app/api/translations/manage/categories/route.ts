@@ -2,6 +2,38 @@ import { NextRequest, NextResponse } from "next/server";
 import { createGraphQLClient } from "@bigcommerce/translations-graphql-client";
 import { getSessionFromContext } from "@/lib/auth";
 
+const CATEGORIES_PAGE_SIZE = 50;
+
+async function fetchAllCategoryTranslations(
+  graphqlClient: any,
+  channelId: number,
+  locale: string
+) {
+  const allEdges: any[] = [];
+  let cursor: string | undefined;
+
+  while (true) {
+    const result = await graphqlClient.getCategoryTranslations({
+      channelId,
+      locale,
+      first: CATEGORIES_PAGE_SIZE,
+      after: cursor,
+    });
+
+    const edges = result.edges || [];
+    allEdges.push(...edges);
+
+    const pageInfo = result.pageInfo;
+    if (pageInfo?.hasNextPage && pageInfo.endCursor) {
+      cursor = pageInfo.endCursor;
+    } else {
+      break;
+    }
+  }
+
+  return allEdges;
+}
+
 // GET - Fetch categories with translations
 export async function GET(request: NextRequest) {
   try {
@@ -30,27 +62,19 @@ export async function GET(request: NextRequest) {
     // Create GraphQL client
     const graphqlClient = createGraphQLClient(accessToken, storeHash);
 
-    const params = {
-      channelId: Number(channelId),
-      locale,
-      first: 50,
-    };
+    console.log('[Categories GET] Fetching paginated category translations');
+    const edges = await fetchAllCategoryTranslations(
+      graphqlClient,
+      Number(channelId),
+      locale
+    );
 
-    console.log('[Categories GET] Request params:', params);
-
-    // Fetch categories
-    const result = await graphqlClient.getCategoryTranslations(params);
-
-    console.log('[Categories GET] Result:', { 
-      edgesCount: result.edges?.length || 0,
-      hasEdges: !!result.edges,
-      fullResult: JSON.stringify(result, null, 2)
-    });
+    console.log('[Categories GET] Total edges fetched:', edges.length);
 
     // Transform data
     // Note: Category translations API returns resourceId (e.g. "bc/store/category/123")
     // and fields array with fieldName, original, and translation
-    const categories = (result.edges || []).map((edge: any) => {
+    const categories = edges.map((edge: any) => {
       const categoryId = edge.node.resourceId?.split("/").pop() || "0";
       const nameField = edge.node.fields?.find((f: any) => f.fieldName === "name");
       
@@ -61,7 +85,6 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    console.log('[Categories GET] Returning categories:', categories.length);
     console.log('[Categories GET] Returning categories:', categories.length);
     return NextResponse.json(categories);
   } catch (error: any) {

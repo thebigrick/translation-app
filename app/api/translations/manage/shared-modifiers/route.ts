@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createGraphQLClient } from "@bigcommerce/translations-graphql-client";
 import { getSessionFromContext } from "@/lib/auth";
+import { extractNumericId } from "@/lib/utils/shared-modifier-helpers";
 
 // GET - Fetch shared modifiers with translations
 export async function GET(request: NextRequest) {
@@ -46,8 +47,9 @@ export async function GET(request: NextRequest) {
       translation: edge.node.overridesForLocale?.displayName || "",
       __typename: edge.node.__typename,
       values: (edge.node.values || []).map((value: any) => {
+        const numericValueId = extractNumericId(value.id);
         const overrideValue = edge.node.overridesForLocale?.values?.find(
-          (v: any) => v.id === value.id
+          (v: any) => extractNumericId(v.id) === numericValueId
         );
         return {
           id: value.id,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Box,
   Table,
@@ -30,6 +30,12 @@ interface SharedOption {
   __typename: string;
 }
 
+type SharedOptionRow = SharedOption & {
+  currentValue: string;
+  hasChanges: boolean;
+  numericId: string;
+};
+
 interface SharedOptionsTableProps {
   context: string | null;
   channelId: number;
@@ -51,6 +57,11 @@ export default function SharedOptionsTable({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [editingValues, setEditingValues] = useState<{ [key: string]: string }>({});
   const [expandedOptions, setExpandedOptions] = useState<Set<string>>(new Set());
+  const editingValuesRef = useRef(editingValues);
+
+  useEffect(() => {
+    editingValuesRef.current = editingValues;
+  }, [editingValues]);
 
   const fetchOptions = useCallback(async () => {
     setIsLoading(true);
@@ -91,7 +102,7 @@ export default function SharedOptionsTable({
     setSuccessMessage(null);
 
     try {
-      const translation = editingValues[optionId];
+      const translation = editingValuesRef.current[optionId];
       
       const response = await fetch(
         `/api/translations/manage/shared-options?context=${context}`,
@@ -131,7 +142,7 @@ export default function SharedOptionsTable({
     } finally {
       setIsSaving(null);
     }
-  }, [context, channelId, locale, editingValues, options]);
+  }, [context, channelId, locale]);
 
   const handleSaveValue = useCallback(async (optionId: string, valueId: string) => {
     const key = `${optionId}:${valueId}`;
@@ -140,7 +151,7 @@ export default function SharedOptionsTable({
     setSuccessMessage(null);
 
     try {
-      const translation = editingValues[key];
+      const translation = editingValuesRef.current[key];
       
       const response = await fetch(
         `/api/translations/manage/shared-options?context=${context}`,
@@ -188,7 +199,7 @@ export default function SharedOptionsTable({
     } finally {
       setIsSaving(null);
     }
-  }, [context, channelId, locale, editingValues, options]);
+  }, [context, channelId, locale]);
 
   const toggleExpanded = useCallback((optionId: string) => {
     setExpandedOptions(prev => {
@@ -209,11 +220,33 @@ export default function SharedOptionsTable({
     [options, searchTerm]
   );
 
+  const computedOptions = useMemo<SharedOptionRow[]>(
+    () =>
+      filteredOptions.map((option) => {
+        const editingValue = editingValues[option.id];
+        const currentValue =
+          editingValue !== undefined
+            ? editingValue
+            : option.translation || "";
+        const hasChanges =
+          editingValue !== undefined && editingValue !== option.translation;
+        const numericId = option.id.split("/").pop() || option.id;
+
+        return {
+          ...option,
+          currentValue,
+          hasChanges,
+          numericId,
+        };
+      }),
+    [filteredOptions, editingValues]
+  );
+
   const columns = useMemo(() => [
     {
       header: "",
       hash: "expand",
-      render: (item: SharedOption) =>
+      render: (item: SharedOptionRow) =>
         item.values.length > 0 ? (
           <Button
             variant="subtle"
@@ -226,49 +259,40 @@ export default function SharedOptionsTable({
     {
       header: "ID",
       hash: "id",
-      render: (item: SharedOption) => {
-        const numericId = item.id.split("/").pop();
-        return numericId;
-      },
+      render: (item: SharedOptionRow) => item.numericId,
       width: 80,
     },
     {
       header: `Display Name (${defaultLocale})`,
       hash: "displayName",
-      render: (item: SharedOption) => item.displayName,
+      render: (item: SharedOptionRow) => item.displayName,
     },
     {
       header: `Translation (${locale})`,
       hash: "translation",
-      render: (item: SharedOption) => {
-        const currentValue = item.id in editingValues 
-          ? editingValues[item.id] 
-          : item.translation;
-        const hasChanges = item.id in editingValues && editingValues[item.id] !== item.translation;
-        
-        return (
-          <Flex alignItems="center">
-            <FlexItem flexGrow={1}>
-              <Input
-                value={currentValue}
-                onChange={(e) => handleTranslationChange(item.id, e.target.value)}
-                placeholder={`Enter ${locale} translation`}
-              />
-            </FlexItem>
-            <FlexItem marginLeft="small">
-              <Button
-                variant="secondary"
-                iconOnly={<CheckIcon />}
-                onClick={() => handleSaveOption(item.id)}
-                disabled={isSaving === item.id || !hasChanges}
-                isLoading={isSaving === item.id}
-              />
-            </FlexItem>
-          </Flex>
-        );
-      },
+      render: (item: SharedOptionRow) => (
+        <Flex alignItems="center">
+          <FlexItem flexGrow={1}>
+            <Input
+              width="100%"
+              value={item.currentValue}
+              onChange={(e) => handleTranslationChange(item.id, e.target.value)}
+              placeholder={`Enter ${locale} translation`}
+            />
+          </FlexItem>
+          <FlexItem marginLeft="small">
+            <Button
+              variant="secondary"
+              iconOnly={<CheckIcon />}
+              onClick={() => handleSaveOption(item.id)}
+              disabled={isSaving === item.id || !item.hasChanges}
+              isLoading={isSaving === item.id}
+            />
+          </FlexItem>
+        </Flex>
+      ),
     },
-  ], [defaultLocale, locale, editingValues, isSaving, handleTranslationChange, handleSaveOption, toggleExpanded, expandedOptions]);
+  ], [defaultLocale, locale, isSaving, handleTranslationChange, handleSaveOption, toggleExpanded]);
 
   if (isLoading) {
     return (
@@ -311,7 +335,7 @@ export default function SharedOptionsTable({
         />
       </Box>
 
-      {filteredOptions.length === 0 ? (
+      {computedOptions.length === 0 ? (
         <Flex
           alignItems="center"
           justifyContent="center"
@@ -322,12 +346,13 @@ export default function SharedOptionsTable({
         </Flex>
       ) : (
         <Box>
-          {filteredOptions.map((option) => (
+          {computedOptions.map((option) => (
             <Box key={option.id} marginBottom="medium">
               <Table
                 columns={columns}
                 items={[option]}
                 stickyHeader={false}
+                keyField="id"
               />
               
               {expandedOptions.has(option.id) && option.values.length > 0 && (
@@ -349,36 +374,38 @@ export default function SharedOptionsTable({
                     const hasChanges = key in editingValues && editingValues[key] !== value.translation;
                     
                     return (
-                      <Flex
-                        key={value.id}
-                        alignItems="center"
-                        marginBottom="small"
-                      >
-                        <FlexItem flexBasis="80px">
-                          <Text color="secondary60">{numericValueId}</Text>
-                        </FlexItem>
-                        <FlexItem flexGrow={1}>
-                          <Text>{value.label}</Text>
-                        </FlexItem>
-                        <FlexItem flexGrow={1}>
-                          <Input
-                            value={currentValue}
-                            onChange={(e) =>
-                              handleTranslationChange(key, e.target.value)
-                            }
-                            placeholder={`Enter ${locale} translation`}
-                          />
-                        </FlexItem>
-                        <FlexItem marginLeft="small">
-                          <Button
-                            variant="secondary"
-                            iconOnly={<CheckIcon />}
-                            onClick={() => handleSaveValue(option.id, value.id)}
-                            disabled={isSaving === key || !hasChanges}
-                            isLoading={isSaving === key}
-                          />
-                        </FlexItem>
-                      </Flex>
+                      <Box key={value.id} style={{ width: "100%" }}>
+                        <Flex
+                          alignItems="center"
+                          marginBottom="small"
+                        >
+                          <FlexItem flexBasis="80px" flexShrink={0}>
+                            <Text color="secondary60">{numericValueId}</Text>
+                          </FlexItem>
+                          <FlexItem flexBasis="220px" flexShrink={0}>
+                            <Text>{value.label}</Text>
+                          </FlexItem>
+                          <FlexItem flexGrow={1}>
+                            <Input
+                              width="100%"
+                              value={currentValue}
+                              onChange={(e) =>
+                                handleTranslationChange(key, e.target.value)
+                              }
+                              placeholder={`Enter ${locale} translation`}
+                            />
+                          </FlexItem>
+                          <FlexItem marginLeft="small">
+                            <Button
+                              variant="secondary"
+                              iconOnly={<CheckIcon />}
+                              onClick={() => handleSaveValue(option.id, value.id)}
+                              disabled={isSaving === key || !hasChanges}
+                              isLoading={isSaving === key}
+                            />
+                          </FlexItem>
+                        </Flex>
+                      </Box>
                     );
                   })}
                 </Box>

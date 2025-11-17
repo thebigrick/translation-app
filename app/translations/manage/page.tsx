@@ -12,6 +12,7 @@ import {
   Flex,
   FlexItem,
   FormGroup,
+  Button,
 } from "@bigcommerce/big-design";
 import { Header, Page } from "@bigcommerce/big-design-patterns";
 import { useChannels } from "@/hooks/useChannels";
@@ -30,12 +31,49 @@ function TranslationsManageContent() {
   const [activeTab, setActiveTab] = useState("categories");
   const [selectedChannel, setSelectedChannel] = useState<number | null>(null);
   const [selectedLocale, setSelectedLocale] = useState<string>("");
+  const [storeHash, setStoreHash] = useState<string | null>(null);
 
   const {
     channels,
     isLoading: isChannelsLoading,
     error: channelsError,
   } = useChannels(context ?? null);
+  
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchStoreHash = async () => {
+      try {
+        const params = context
+          ? `?context=${encodeURIComponent(context)}`
+          : "";
+
+        const response = await fetch(`/api/store-hash${params}`, {
+          credentials: "include",
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch store hash");
+        }
+
+        const data = await response.json();
+        if (isMounted) {
+          setStoreHash(data.storeHash || null);
+        }
+      } catch (error) {
+        console.error("[Translations Manage] Unable to fetch store hash:", error);
+        if (isMounted) {
+          setStoreHash(null);
+        }
+      }
+    };
+
+    fetchStoreHash();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [context]);
 
   // Get available locales for selected channel, excluding the default locale
   const availableLocales = selectedChannel
@@ -149,6 +187,10 @@ function TranslationsManageContent() {
 
   const tabs = [
     {
+      id: "products",
+      title: t("tabs.products"),
+    },
+    {
       id: "categories",
       title: t("tabs.categories"),
     },
@@ -175,6 +217,30 @@ function TranslationsManageContent() {
     value: l.code,
     content: l.title || l.code,
   }));
+
+  const handleProductsListClick = () => {
+    if (!storeHash) {
+      console.warn(
+        "[Translations Manage] Store hash not found, cannot open product list"
+      );
+      return;
+    }
+
+    const targetUrl = `https://store-${storeHash}.mybigcommerce.com/manage/products`;
+
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    if (window.top) {
+      window.top.location.href = targetUrl;
+    } else {
+      window.location.href = targetUrl;
+    }
+  };
+
+  const requiresChannelSelection =
+    activeTab !== "products" && (!selectedChannel || !selectedLocale);
 
   return (
     <Page
@@ -227,14 +293,29 @@ function TranslationsManageContent() {
         />
 
         <Box padding="medium">
-          {!selectedChannel || !selectedLocale ? (
+          {requiresChannelSelection ? (
             <Text>Please select a channel and locale to begin</Text>
           ) : (
             <>
+              {activeTab === "products" && (
+                <Flex flexDirection="column" flexGap="medium">
+                  <Text>{t("productsTab.description")}</Text>
+                  <Flex>
+                    <Button
+                      onClick={handleProductsListClick}
+                      disabled={!storeHash}
+                      variant="primary"
+                    >
+                      {t("productsTab.button")}
+                    </Button>
+                  </Flex>
+                </Flex>
+              )}
+
               {activeTab === "categories" && (
                 <CategoriesTable
                   context={context}
-                  channelId={selectedChannel}
+                  channelId={selectedChannel!}
                   locale={selectedLocale}
                   defaultLocale={defaultLocale}
                 />
@@ -243,7 +324,7 @@ function TranslationsManageContent() {
               {activeTab === "shared-options" && (
                 <SharedOptionsTable
                   context={context}
-                  channelId={selectedChannel}
+                  channelId={selectedChannel!}
                   locale={selectedLocale}
                   defaultLocale={defaultLocale}
                 />
@@ -252,7 +333,7 @@ function TranslationsManageContent() {
               {activeTab === "shared-modifiers" && (
                 <SharedModifiersTable
                   context={context}
-                  channelId={selectedChannel}
+                  channelId={selectedChannel!}
                   locale={selectedLocale}
                   defaultLocale={defaultLocale}
                 />

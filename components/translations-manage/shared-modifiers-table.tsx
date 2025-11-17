@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Box,
   Table,
@@ -28,6 +28,12 @@ interface SharedModifier {
   __typename: string;
 }
 
+type SharedModifierRow = SharedModifier & {
+  currentValue: string;
+  hasChanges: boolean;
+  numericId: string;
+};
+
 interface SharedModifiersTableProps {
   context: string | null;
   channelId: number;
@@ -49,6 +55,11 @@ export default function SharedModifiersTable({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [editingValues, setEditingValues] = useState<{ [key: string]: string }>({});
   const [expandedModifiers, setExpandedModifiers] = useState<Set<string>>(new Set());
+  const editingValuesRef = useRef(editingValues);
+
+  useEffect(() => {
+    editingValuesRef.current = editingValues;
+  }, [editingValues]);
 
   const fetchModifiers = useCallback(async () => {
     setIsLoading(true);
@@ -88,7 +99,7 @@ export default function SharedModifiersTable({
     setSuccessMessage(null);
 
     try {
-      const translation = editingValues[modifierId];
+      const translation = editingValuesRef.current[modifierId];
       
       const response = await fetch(
         `/api/translations/manage/shared-modifiers?context=${context}`,
@@ -128,7 +139,7 @@ export default function SharedModifiersTable({
     } finally {
       setIsSaving(null);
     }
-  }, [context, channelId, locale, editingValues, modifiers]);
+  }, [context, channelId, locale]);
 
   const handleSaveValue = useCallback(async (modifierId: string, valueId: string) => {
     const key = `${modifierId}:${valueId}`;
@@ -137,7 +148,7 @@ export default function SharedModifiersTable({
     setSuccessMessage(null);
 
     try {
-      const translation = editingValues[key];
+      const translation = editingValuesRef.current[key];
       
       const response = await fetch(
         `/api/translations/manage/shared-modifiers?context=${context}`,
@@ -185,7 +196,7 @@ export default function SharedModifiersTable({
     } finally {
       setIsSaving(null);
     }
-  }, [context, channelId, locale, editingValues, modifiers]);
+  }, [context, channelId, locale]);
 
   const toggleExpanded = useCallback((modifierId: string) => {
     setExpandedModifiers(prev => {
@@ -206,11 +217,33 @@ export default function SharedModifiersTable({
     [modifiers, searchTerm]
   );
 
+  const computedModifiers = useMemo<SharedModifierRow[]>(
+    () =>
+      filteredModifiers.map((modifier) => {
+        const editingValue = editingValues[modifier.id];
+        const currentValue =
+          editingValue !== undefined
+            ? editingValue
+            : modifier.translation || "";
+        const hasChanges =
+          editingValue !== undefined && editingValue !== modifier.translation;
+        const numericId = modifier.id.split("/").pop() || modifier.id;
+
+        return {
+          ...modifier,
+          currentValue,
+          hasChanges,
+          numericId,
+        };
+      }),
+    [filteredModifiers, editingValues]
+  );
+
   const columns = useMemo(() => [
     {
       header: "",
       hash: "expand",
-      render: (item: SharedModifier) =>
+      render: (item: SharedModifierRow) =>
         item.values.length > 0 ? (
           <Button
             variant="subtle"
@@ -223,49 +256,39 @@ export default function SharedModifiersTable({
     {
       header: "ID",
       hash: "id",
-      render: (item: SharedModifier) => {
-        const numericId = item.id.split("/").pop();
-        return numericId;
-      },
+      render: (item: SharedModifierRow) => item.numericId,
       width: 80,
     },
     {
       header: `Display Name (${defaultLocale})`,
       hash: "displayName",
-      render: (item: SharedModifier) => item.displayName,
+      render: (item: SharedModifierRow) => item.displayName,
     },
     {
       header: `Translation (${locale})`,
       hash: "translation",
-      render: (item: SharedModifier) => {
-        const currentValue = item.id in editingValues 
-          ? editingValues[item.id] 
-          : item.translation;
-        const hasChanges = item.id in editingValues && editingValues[item.id] !== item.translation;
-        
-        return (
-          <Flex alignItems="center">
-            <FlexItem flexGrow={1}>
-              <Input
-                value={currentValue}
-                onChange={(e) => handleTranslationChange(item.id, e.target.value)}
-                placeholder={`Enter ${locale} translation`}
-              />
-            </FlexItem>
-            <FlexItem marginLeft="small">
-              <Button
-                variant="secondary"
-                iconOnly={<CheckIcon />}
-                onClick={() => handleSaveModifier(item.id)}
-                disabled={isSaving === item.id || !hasChanges}
-                isLoading={isSaving === item.id}
-              />
-            </FlexItem>
-          </Flex>
-        );
-      },
+      render: (item: SharedModifierRow) => (
+        <Flex alignItems="center">
+          <FlexItem flexGrow={1}>
+            <Input
+              value={item.currentValue}
+              onChange={(e) => handleTranslationChange(item.id, e.target.value)}
+              placeholder={`Enter ${locale} translation`}
+            />
+          </FlexItem>
+          <FlexItem marginLeft="small">
+            <Button
+              variant="secondary"
+              iconOnly={<CheckIcon />}
+              onClick={() => handleSaveModifier(item.id)}
+              disabled={isSaving === item.id || !item.hasChanges}
+              isLoading={isSaving === item.id}
+            />
+          </FlexItem>
+        </Flex>
+      ),
     },
-  ], [defaultLocale, locale, editingValues, isSaving, handleTranslationChange, handleSaveModifier, toggleExpanded, expandedModifiers]);
+  ], [defaultLocale, locale, isSaving, handleTranslationChange, handleSaveModifier, toggleExpanded]);
 
   if (isLoading) {
     return (
@@ -308,7 +331,7 @@ export default function SharedModifiersTable({
         />
       </Box>
 
-      {filteredModifiers.length === 0 ? (
+      {computedModifiers.length === 0 ? (
         <Flex
           alignItems="center"
           justifyContent="center"
@@ -319,12 +342,13 @@ export default function SharedModifiersTable({
         </Flex>
       ) : (
         <Box>
-          {filteredModifiers.map((modifier) => (
+          {computedModifiers.map((modifier) => (
             <Box key={modifier.id} marginBottom="medium">
               <Table
                 columns={columns}
                 items={[modifier]}
                 stickyHeader={false}
+                keyField="id"
               />
               
               {expandedModifiers.has(modifier.id) && modifier.values.length > 0 && (

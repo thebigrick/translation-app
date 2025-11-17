@@ -5,7 +5,7 @@ import ActiveStateIcon from "@/icons/multi-lang-active-icon.svg";
 import InactiveStateIcon from "@/icons/multi-lang-inactive-icon.svg";
 import LoadingStateIcon from "@/icons/multi-lang-loading-icon.svg";
 import { Suspense } from "react";
-import { Button, Flex, FlexItem, Text } from "@bigcommerce/big-design";
+import { Button, Flex, FlexItem, Text, Box, H3 } from "@bigcommerce/big-design";
 import { LoadingScreen } from "@/components/loading-indicator";
 
 function TranslationsGetStartedContent({
@@ -16,9 +16,11 @@ function TranslationsGetStartedContent({
   isLoading?: boolean;
 }) {
   const t = useTranslations("app.getStarted");
+  const quickActionsT = useTranslations("app.home.quickActions");
   const router = useRouter();
   const searchParams = useSearchParams();
   const context = searchParams?.get("context");
+  const contextQuery = context ? `?context=${context}` : "";
 
   const mainText = isLoading
     ? t("checking")
@@ -34,15 +36,24 @@ function TranslationsGetStartedContent({
 
   const buttonText = isActive ? t("startWorkflow") : t("contactSupport");
 
+  const handleUploadClick = () => {
+    router.push(`/translations/jobs${contextQuery}`);
+  };
+
+  const handleEditorClick = () => {
+    router.push(`/translations/manage${contextQuery}`);
+  };
+
   const handleClick = () => {
     if (isActive) {
-      router.push(`/translations/jobs${context ? `?context=${context}` : ""}`);
-    } else {
-      window.open(
-        "https://support.bigcommerce.com/s/article/Multi-Language-Setup",
-        "_blank"
-      );
+      handleUploadClick();
+      return;
     }
+
+    window.open(
+      "https://support.bigcommerce.com/s/article/Multi-Language-Setup",
+      "_blank"
+    );
   };
 
   return (
@@ -74,11 +85,87 @@ function TranslationsGetStartedContent({
           {secondaryText}
         </Text>
       </FlexItem>
-      <FlexItem>
-        <Button isLoading={isLoading} variant="secondary" onClick={handleClick}>
-          {buttonText}
-        </Button>
-      </FlexItem>
+      {isActive && !isLoading ? (
+        <FlexItem style={{ width: "100%" }}>
+          <Flex
+            flexWrap="wrap"
+            justifyContent="center"
+            flexGap="1.5rem"
+            style={{ width: "100%" }}
+          >
+            <Box
+              border="box"
+              padding="large"
+              borderRadius="normal"
+              style={{
+                cursor: "pointer",
+                minWidth: "260px",
+                flex: "1 1 320px",
+                maxWidth: "400px",
+              }}
+              onClick={handleUploadClick}
+            >
+              <Flex flexDirection="column" flexGap="0.5rem">
+                <H3 margin="none">{quickActionsT("jobs.title")}</H3>
+                <Text color="secondary60">
+                  {quickActionsT("jobs.description")}
+                </Text>
+                <Box marginTop="small">
+                  <Button
+                    variant="primary"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleUploadClick();
+                    }}
+                  >
+                    {quickActionsT("jobs.button")}
+                  </Button>
+                </Box>
+              </Flex>
+            </Box>
+            <Box
+              border="box"
+              padding="large"
+              borderRadius="normal"
+              style={{
+                cursor: "pointer",
+                minWidth: "260px",
+                flex: "1 1 320px",
+                maxWidth: "400px",
+              }}
+              onClick={handleEditorClick}
+            >
+              <Flex flexDirection="column" flexGap="0.5rem">
+                <H3 margin="none">{quickActionsT("manage.title")}</H3>
+                <Text color="secondary60">
+                  {quickActionsT("manage.description")}
+                </Text>
+                <Box marginTop="small">
+                  <Button
+                    variant="secondary"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleEditorClick();
+                    }}
+                  >
+                    {quickActionsT("manage.button")}
+                  </Button>
+                </Box>
+              </Flex>
+            </Box>
+          </Flex>
+        </FlexItem>
+      ) : (
+        <FlexItem>
+          <Button
+            isLoading={isLoading}
+            variant="secondary"
+            onClick={handleClick}
+          >
+            {buttonText}
+          </Button>
+        </FlexItem>
+      )}
     </Flex>
   );
 }

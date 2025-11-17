@@ -26,6 +26,13 @@ export const GetSharedProductOptionsDocument = graphql(`
             id
             displayName
             __typename
+            overridesForLocale(localeContext: $localeContext) {
+              displayName
+              values {
+                id
+                label
+              }
+            }
             
             # Dropdown specific
             ... on DropdownSharedProductOption {
@@ -33,13 +40,6 @@ export const GetSharedProductOptionsDocument = graphql(`
                 id
                 label
                 isDefault
-              }
-              overridesForLocale(localeContext: $localeContext) {
-                displayName
-                values {
-                  id
-                  label
-                }
               }
             }
             
@@ -50,13 +50,6 @@ export const GetSharedProductOptionsDocument = graphql(`
                 label
                 isDefault
               }
-              overridesForLocale(localeContext: $localeContext) {
-                displayName
-                values {
-                  id
-                  label
-                }
-              }
             }
             
             # RectangleList specific
@@ -66,13 +59,6 @@ export const GetSharedProductOptionsDocument = graphql(`
                 label
                 isDefault
               }
-              overridesForLocale(localeContext: $localeContext) {
-                displayName
-                values {
-                  id
-                  label
-                }
-              }
             }
             
             # Swatch specific
@@ -81,13 +67,6 @@ export const GetSharedProductOptionsDocument = graphql(`
                 id
                 label
                 isDefault
-              }
-              overridesForLocale(localeContext: $localeContext) {
-                displayName
-                values {
-                  id
-                  label
-                }
               }
             }
           }

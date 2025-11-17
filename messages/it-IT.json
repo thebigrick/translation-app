@@ -22,13 +22,13 @@
         "title": "Azioni Rapide",
         "manage": {
           "title": "Gestisci Traduzioni",
-          "description": "Modifica le traduzioni direttamente nell'app senza file CSV",
+          "description": "Modifica le traduzioni direttamente nel tuo pannello di amministrazione",
           "button": "Apri Editor"
         },
         "jobs": {
           "title": "Lavori Import/Export",
           "description": "Importa ed esporta traduzioni in blocco usando file CSV",
-          "button": "Visualizza Lavori"
+          "button": "Importa/Esporta CSV"
         }
       }
     },
@@ -139,13 +139,18 @@
   "translations": {
     "manage": {
       "pageTitle": "Gestione Traduzioni",
-      "pageDescription": "Modifica le traduzioni direttamente senza file CSV",
+      "pageDescription": "Modifica le traduzioni",
       "selectChannel": "Seleziona Canale",
       "selectLocale": "Seleziona Lingua di Destinazione",
       "tabs": {
+        "products": "Prodotti",
         "categories": "Categorie",
         "sharedOptions": "Opzioni Condivise",
         "sharedModifiers": "Modificatori Condivisi"
+      },
+      "productsTab": {
+        "description": "Le traduzioni dei prodotti possono essere gestite dall'elenco prodotti. Apri la lista e clicca sui tre puntini nella riga del prodotto per accedere alle opzioni di traduzione.",
+        "button": "Vai alla lista prodotti"
       },
       "navigation": {
         "back": "Torna alla Home"
