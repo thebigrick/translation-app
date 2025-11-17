@@ -2,7 +2,7 @@
 
 import React from "react";
 import { useTranslations } from 'next-intl';
-import { Box, Grid, GridItem, FormGroup, Input } from "@bigcommerce/big-design";
+import { Box, Grid, GridItem, FormGroup, Input, Badge } from "@bigcommerce/big-design";
 import { ReceiptIcon } from "@bigcommerce/big-design-icons";
 import SectionHeader from "./section-header";
 
@@ -15,6 +15,7 @@ interface ProductOption {
   id: string;
   displayName: string;
   values: ProductOptionValue[];
+  isShared?: boolean;
 }
 
 interface FormOption {
@@ -22,6 +23,7 @@ interface FormOption {
   values: {
     [valueId: string]: string;
   };
+  isShared?: boolean;
 }
 
 interface ProductOptionsProps {
@@ -50,13 +52,22 @@ const ProductOptions: React.FC<ProductOptionsProps> = ({
   return (
     <Box paddingBottom="xSmall">
       <SectionHeader icon={ReceiptIcon} title={t('variants.title')} />
-      {options.map((option) => (
+      {options.map((option) => {
+        const isShared = option.node.isShared || false;
+        
+        return (
         <Box
           key={option.node.id}
           marginBottom="medium"
           borderLeft="box"
           paddingLeft="small"
+          backgroundColor={isShared ? "secondary10" : undefined}
         >
+          {isShared && (
+            <Box paddingBottom="xSmall">
+              <Badge label="Shared Option (managed globally)" variant="secondary" />
+            </Box>
+          )}
           <Grid
             gridColumns={{
               mobile: "repeat(1, 1fr)",
@@ -84,6 +95,8 @@ const ProductOptions: React.FC<ProductOptionsProps> = ({
                     name={`option_${option.node.id}`}
                     value={formOptions?.[option.node.id]?.displayName || ""}
                     onChange={onChange}
+                    readOnly={isShared}
+                    disabled={isShared}
                   />
                 </FormGroup>
               </GridItem>
@@ -119,6 +132,8 @@ const ProductOptions: React.FC<ProductOptionsProps> = ({
                       name={`optionValue_${option.node.id}:${value.id}`}
                       value={formOptions?.[option.node.id]?.values?.[value.id] || ""}
                       onChange={onChange}
+                      readOnly={isShared}
+                      disabled={isShared}
                     />
                   </FormGroup>
                 </GridItem>
@@ -126,7 +141,8 @@ const ProductOptions: React.FC<ProductOptionsProps> = ({
             </Grid>
           ))}
         </Box>
-      ))}
+      );
+      })}
     </Box>
   );
 };

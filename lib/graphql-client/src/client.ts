@@ -52,6 +52,12 @@ import {
   createGetSharedProductModifiersVariables,
   createSetSharedProductModifiersVariables,
 } from "./queries/shared-modifiers.tada";
+import {
+  GetSharedProductOptionsDocument,
+  SetSharedProductOptionsInformationDocument,
+  createGetSharedProductOptionsVariables,
+  createSetSharedProductOptionsVariables,
+} from "./queries/shared-options.tada";
 import { graphql } from "./graphql";
 import type { ResultOf, VariablesOf } from "./graphql";
 import type { GraphQLResponse } from "./types/graphql";
@@ -1342,5 +1348,63 @@ export class GraphQLClient {
 
     return response.data.sharedProductModifiers
       .setSharedProductModifiersInformation;
+  }
+
+  // Shared Product Options Methods
+  async getSharedProductOptions(params: {
+    channelId: number;
+    locale: string;
+    first?: number;
+    after?: string | null;
+    ids?: string[];
+  }) {
+    type Response = ResultOf<typeof GetSharedProductOptionsDocument>;
+    type OptionsType = NonNullable<
+      Response["store"]
+    >["sharedProductOptions"];
+
+    const variables = createGetSharedProductOptionsVariables(params);
+
+    const response = await this.request<Response>(
+      { query: print(GetSharedProductOptionsDocument) },
+      variables
+    );
+
+    if (!response.data?.store?.sharedProductOptions) {
+      throw new Error("Failed to get shared product options");
+    }
+
+    return response.data.store.sharedProductOptions;
+  }
+
+  async setSharedProductOptionsInformation(params: {
+    channelId: number;
+    locale: string;
+    options: Array<{
+      optionId: string;
+      type: string;
+      data: any;
+    }>;
+  }) {
+    type Response = ResultOf<
+      typeof SetSharedProductOptionsInformationDocument
+    >;
+
+    const variables = createSetSharedProductOptionsVariables(params);
+
+    const response = await this.request<Response>(
+      { query: print(SetSharedProductOptionsInformationDocument) },
+      variables
+    );
+
+    if (
+      !response.data?.sharedProductOptions
+        ?.setSharedProductOptionsInformation
+    ) {
+      throw new Error("Failed to set shared product options information");
+    }
+
+    return response.data.sharedProductOptions
+      .setSharedProductOptionsInformation;
   }
 }

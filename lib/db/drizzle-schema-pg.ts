@@ -39,7 +39,7 @@ export const translationJobs = pgTable('translation_jobs', {
   storeHash: varchar('store_hash', { length: 255 }).notNull(),
   status: varchar('status', { enum: ['pending', 'processing', 'completed', 'failed'] }).notNull().default('pending'),
   jobType: varchar('job_type', { enum: ['import', 'export'] }).notNull(),
-  resourceType: varchar('resource_type', { enum: ['products', 'categories', 'shared-modifiers'] }).notNull().default('products'),
+  resourceType: varchar('resource_type', { enum: ['products', 'categories', 'shared-modifiers', 'shared-options'] }).notNull().default('products'),
   fileUrl: varchar('file_url', { length: 1024 }),
   channelId: integer('channel_id').notNull(),
   locale: varchar('locale', { length: 10 }).notNull(),

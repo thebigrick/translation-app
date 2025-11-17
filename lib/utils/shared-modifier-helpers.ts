@@ -222,14 +222,5 @@ export function validateCSVRecord(
     errors.push(`Row ${rowNumber}: modifierId is required`);
   }
 
-  // At least one translation field should be present
-  const hasTranslation = Object.keys(record).some(key => 
-    key.endsWith(`_${locale}`) && record[key] !== '' && record[key] !== undefined
-  );
-
-  if (!hasTranslation) {
-    errors.push(`Row ${rowNumber}: No translation provided for locale ${locale}`);
-  }
-
   return errors;
 }

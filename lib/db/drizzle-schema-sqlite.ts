@@ -39,7 +39,7 @@ export const translationJobs = sqliteTable('translation_jobs', {
   storeHash: text('store_hash').notNull(),
   status: text('status', { enum: ['pending', 'processing', 'completed', 'failed'] }).notNull().default('pending'),
   jobType: text('job_type', { enum: ['import', 'export'] }).notNull(),
-  resourceType: text('resource_type', { enum: ['products', 'categories', 'shared-modifiers'] }).notNull().default('products'),
+  resourceType: text('resource_type', { enum: ['products', 'categories', 'shared-modifiers', 'shared-options'] }).notNull().default('products'),
   fileUrl: text('file_url'),
   channelId: integer('channel_id').notNull(),
   locale: text('locale').notNull(),

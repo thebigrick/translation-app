@@ -39,7 +39,7 @@ export const translationJobs = mysqlTable('translation_jobs', {
   storeHash: varchar('store_hash', { length: 255 }).notNull(),
   status: mysqlEnum('status', ['pending', 'processing', 'completed', 'failed']).notNull().default('pending'),
   jobType: mysqlEnum('job_type', ['import', 'export']).notNull(),
-  resourceType: mysqlEnum('resource_type', ['products', 'categories', 'shared-modifiers']).notNull().default('products'),
+  resourceType: mysqlEnum('resource_type', ['products', 'categories', 'shared-modifiers', 'shared-options']).notNull().default('products'),
   fileUrl: varchar('file_url', { length: 1024 }),
   channelId: int('channel_id').notNull(),
   locale: varchar('locale', { length: 10 }).notNull(),

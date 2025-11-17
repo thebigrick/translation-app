@@ -37,6 +37,13 @@ import {
   generateSharedModifierCSVHeaders,
   formatSharedModifierForCSV,
 } from "@/lib/utils/shared-modifier-helpers";
+import {
+  SharedOptionTranslationRecord,
+  validateCSVRecord as validateOptionCSVRecord,
+  prepareSharedOptionTranslationData,
+  generateSharedOptionCSVHeaders,
+  formatSharedOptionForCSV,
+} from "@/lib/utils/shared-option-helpers";
 
 // CSV record type
 interface TranslationRecord {
@@ -395,6 +402,8 @@ const CONFIG = {
     Number(process.env.TRANSLATION_CATEGORIES_PER_PAGE) || 50,
   SHARED_MODIFIERS_PER_PAGE:
     Number(process.env.TRANSLATION_SHARED_MODIFIERS_PER_PAGE) || 50,
+  SHARED_OPTIONS_PER_PAGE:
+    Number(process.env.TRANSLATION_SHARED_OPTIONS_PER_PAGE) || 50,
 
   // Batch processing settings
   IMPORT_BATCH_SIZE: Number(process.env.TRANSLATION_IMPORT_BATCH_SIZE) || 3,
@@ -1537,13 +1546,17 @@ async function processSharedModifiersImportJob(
       throw new Error(`CSV validation failed:\n${allErrors.join("\n")}`);
     }
 
-    // Group records by modifierId
+    // Group records by modifierId (convert to number for proper grouping)
     const modifierGroups = new Map<number, SharedModifierTranslationRecord[]>();
     records.forEach((record) => {
-      if (!modifierGroups.has(record.modifierId)) {
-        modifierGroups.set(record.modifierId, []);
+      const numericModifierId = typeof record.modifierId === 'string' 
+        ? parseInt(record.modifierId, 10) 
+        : record.modifierId;
+      
+      if (!modifierGroups.has(numericModifierId)) {
+        modifierGroups.set(numericModifierId, []);
       }
-      modifierGroups.get(record.modifierId)!.push(record);
+      modifierGroups.get(numericModifierId)!.push(record);
     });
 
     console.log(
@@ -1575,17 +1588,19 @@ async function processSharedModifiersImportJob(
       "modifiers"
     );
 
-    typesResult.edges?.forEach((edge: any) => {
-      const numericId = parseInt(edge.node.id.split("/").pop() || "0", 10);
+    if (typesResult.edges) {
+      typesResult.edges.forEach((edge: any) => {
+        const numericId = parseInt(edge.node.id.split("/").pop() || "0", 10);
 
-      // Only map the ones we need
-      if (modifierIdsNeeded.includes(numericId)) {
-        console.log(
-          `[Shared Modifiers Import] Found needed modifier: ${edge.node.id} -> ${numericId} -> ${edge.node.__typename}`
-        );
-        modifierTypesMap.set(numericId, edge.node.__typename);
-      }
-    });
+        // Only map the ones we need
+        if (modifierIdsNeeded.includes(numericId)) {
+          console.log(
+            `[Shared Modifiers Import] Found needed modifier: ${edge.node.id} -> ${numericId} -> ${edge.node.__typename}`
+          );
+          modifierTypesMap.set(numericId, edge.node.__typename);
+        }
+      });
+    }
 
     console.log(
       `[Shared Modifiers Import] Found types for ${modifierTypesMap.size} of ${modifierIdsNeeded.length} modifiers`
@@ -1859,6 +1874,380 @@ async function processSharedModifiersExportJob(
   }
 }
 
+// Process a shared options import job
+async function processSharedOptionsImportJob(
+  job: TranslationJob,
+  graphqlClient: any
+) {
+  console.log(
+    `[Shared Options Import] Starting import job ${job.id} for channel ${job.channelId} and locale ${job.locale}`
+  );
+
+  try {
+    if (!job.fileUrl) {
+      throw new Error("No file URL provided for import job");
+    }
+
+    // Fetch CSV file
+    console.log(`[Shared Options Import] Fetching CSV from ${job.fileUrl}`);
+    const response = await fetch(job.fileUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch CSV file: ${response.statusText}`);
+    }
+
+    const csvContent = await response.text();
+    console.log("[Shared Options Import] Parsing CSV content");
+    console.log(
+      "[Shared Options Import] CSV preview:",
+      csvContent.substring(0, 500)
+    );
+    const records = await parseCSV<SharedOptionTranslationRecord>(csvContent);
+    console.log(
+      `[Shared Options Import] Found ${records.length} records to import`
+    );
+    console.log(
+      "[Shared Options Import] First 3 records:",
+      JSON.stringify(records.slice(0, 3), null, 2)
+    );
+
+    // Validate all records first
+    const allErrors: string[] = [];
+    records.forEach((record, index) => {
+      const errors = validateOptionCSVRecord(record, index + 2, job.locale);
+      allErrors.push(...errors);
+    });
+
+    if (allErrors.length > 0) {
+      throw new Error(`CSV validation failed:\n${allErrors.join("\n")}`);
+    }
+
+    // Group records by optionId (convert to number for proper grouping)
+    const optionGroups = new Map<number, SharedOptionTranslationRecord[]>();
+    records.forEach((record) => {
+      const numericOptionId = typeof record.optionId === 'string' 
+        ? parseInt(record.optionId, 10) 
+        : record.optionId;
+      
+      if (!optionGroups.has(numericOptionId)) {
+        optionGroups.set(numericOptionId, []);
+      }
+      optionGroups.get(numericOptionId)!.push(record);
+    });
+
+    console.log(
+      `[Shared Options Import] Grouped into ${optionGroups.size} options`
+    );
+
+    // Fetch option types for all options in the CSV
+    console.log("[Shared Options Import] Fetching option types from API");
+    const optionIdsNeeded = Array.from(optionGroups.keys());
+
+    console.log(
+      "[Shared Options Import] Need types for option IDs:",
+      JSON.stringify(optionIdsNeeded)
+    );
+
+    const optionTypesMap = new Map<number, string>();
+
+    // Fetch all options (we'll filter to only the ones we need)
+    const typesResult = await graphqlClient.getSharedProductOptions({
+      channelId: job.channelId,
+      locale: job.locale,
+      first: 50,
+    });
+
+    console.log(
+      "[Shared Options Import] Query returned:",
+      typesResult.edges?.length || 0,
+      "options"
+    );
+
+    if (typesResult.edges) {
+      typesResult.edges.forEach((edge: any) => {
+        const numericId = parseInt(edge.node.id.split("/").pop() || "0", 10);
+
+        // Only map the ones we need
+        if (optionIdsNeeded.includes(numericId)) {
+          console.log(
+            `[Shared Options Import] Found needed option: ${edge.node.id} -> ${numericId} -> ${edge.node.__typename}`
+          );
+          optionTypesMap.set(numericId, edge.node.__typename);
+        }
+      });
+    }
+
+    console.log(
+      `[Shared Options Import] Found types for ${optionTypesMap.size} of ${optionIdsNeeded.length} options`
+    );
+    console.log(
+      "[Shared Options Import] Types map:",
+      JSON.stringify(Array.from(optionTypesMap.entries()))
+    );
+
+    // Process options in batches
+    const optionBatches: any[] = [];
+    const batchSize = 10;
+
+    optionGroups.forEach((groupRecords, optionId) => {
+      const optionType = optionTypesMap.get(optionId);
+      if (!optionType) {
+        console.warn(
+          `[Shared Options Import] Skipping option ${optionId}: type not found`
+        );
+        return;
+      }
+
+      const optionData = prepareSharedOptionTranslationData(
+        groupRecords,
+        job.locale,
+        optionType,
+        optionId
+      );
+
+      if (optionData) {
+        optionBatches.push(optionData);
+      }
+    });
+
+    console.log(
+      `[Shared Options Import] Prepared ${optionBatches.length} options for update`
+    );
+
+    // Update in batches
+    for (let i = 0; i < optionBatches.length; i += batchSize) {
+      const batch = optionBatches.slice(i, i + batchSize);
+
+      try {
+        console.log(
+          `[Shared Options Import] Processing batch ${
+            Math.floor(i / batchSize) + 1
+          } of ${Math.ceil(optionBatches.length / batchSize)}`
+        );
+
+        // DEBUG: Log the mutation payload
+        const mutationInput = {
+          channelId: job.channelId,
+          locale: job.locale,
+          options: batch,
+        };
+        console.log(
+          "[Shared Options Import] Mutation payload:",
+          JSON.stringify(mutationInput, null, 2)
+        );
+
+        console.log(
+          "[Shared Options Import] Calling setSharedProductOptionsInformation..."
+        );
+
+        const result = await graphqlClient.setSharedProductOptionsInformation(
+          mutationInput
+        );
+
+        // DEBUG: Log the mutation result
+        console.log(
+          "[Shared Options Import] Mutation result:",
+          JSON.stringify(result, null, 2)
+        );
+
+        console.log(
+          `[Shared Options Import] Successfully updated ${batch.length} options`
+        );
+      } catch (error) {
+        console.error(`[Shared Options Import] Error updating batch:`, error);
+        const errorWithResponse = error as Error & {
+          response?: any;
+          errors?: any;
+        };
+        // Log the error to the database
+        await logTranslationError({
+          jobId: job.id,
+          entityId: 0,
+          lineNumber: i + 1,
+          errorType: "api_error",
+          errorMessage: errorWithResponse.message,
+          rawData: JSON.stringify({
+            batch,
+            response: errorWithResponse.errors || errorWithResponse.response,
+          }),
+        });
+        // Continue with next batch
+      }
+
+      // Add a small delay between batches for rate limiting
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    console.log(
+      `[Shared Options Import] Job ${job.id} completed successfully`
+    );
+  } catch (error) {
+    console.error("[Shared Options Import] Job failed:", error);
+    throw error;
+  }
+}
+
+// Process a shared options export job
+async function processSharedOptionsExportJob(
+  job: TranslationJob,
+  graphqlClient: any,
+  restClient: BigCommerceRestClient
+) {
+  console.log(
+    `[Shared Options Export] Starting export job ${job.id} for channel ${job.channelId} and locale ${job.locale}`
+  );
+
+  try {
+    // Get channel details first
+    console.log(
+      `[Shared Options Export] Fetching channel details for channel ${job.channelId}`
+    );
+    const channelResponse = await restClient.getChannel(job.channelId);
+    const channelName =
+      channelResponse.data?.name || `channel-${job.channelId}`;
+
+    // Get channel locales to determine default locale
+    console.log(
+      `[Shared Options Export] Fetching channel locales for channel ${job.channelId}`
+    );
+    const { data: localesData } = await restClient.getChannelLocales(
+      job.channelId
+    );
+    const defaultLocale =
+      localesData.find((locale) => locale.is_default)?.code ||
+      fallbackLocale.code;
+    console.log(
+      `[Shared Options Export] Using default locale: ${defaultLocale}`
+    );
+
+    // Get shared options with pagination
+    console.log(
+      `[Shared Options Export] Fetching shared options for channel ${job.channelId} and locale ${job.locale}`
+    );
+    const optionEdges: any[] = [];
+    let cursor: string | undefined;
+    let pageNumber = 1;
+
+    while (true) {
+      const optionsPage = await graphqlClient.getSharedProductOptions({
+        channelId: job.channelId,
+        locale: job.locale,
+        first: CONFIG.SHARED_OPTIONS_PER_PAGE,
+        after: cursor,
+      });
+
+      const edges = optionsPage.edges || [];
+      console.log(
+        `[Shared Options Export] Page ${pageNumber} returned ${edges.length} options`
+      );
+      optionEdges.push(...edges);
+
+      const pageInfo = optionsPage.pageInfo;
+      if (pageInfo?.hasNextPage && pageInfo.endCursor) {
+        cursor = pageInfo.endCursor;
+        pageNumber += 1;
+        console.log(
+          `[Shared Options Export] Waiting ${CONFIG.MIN_DELAY_BETWEEN_PAGES}ms before fetching next page`
+        );
+        await new Promise((resolve) =>
+          setTimeout(resolve, CONFIG.MIN_DELAY_BETWEEN_PAGES)
+        );
+      } else {
+        break;
+      }
+    }
+
+    console.log(
+      `[Shared Options Export] Found ${optionEdges.length} shared options`
+    );
+
+    if (!optionEdges.length) {
+      throw new Error("No shared options found for export");
+    }
+
+    // Format options for CSV (each option can produce multiple rows)
+    const allRecords: any[] = [];
+    optionEdges.forEach((edge: any) => {
+      const records = formatSharedOptionForCSV(
+        edge.node,
+        defaultLocale,
+        job.locale
+      );
+      allRecords.push(...records);
+    });
+
+    console.log(
+      `[Shared Options Export] Creating CSV with ${allRecords.length} rows`
+    );
+
+    // Generate CSV content
+    const headers = generateSharedOptionCSVHeaders(defaultLocale, job.locale);
+    const csvConfig: UnparseConfig = {
+      quotes: true,
+      quoteChar: '"',
+      escapeChar: '"',
+      delimiter: ",",
+      header: true,
+      newline: "\n",
+      skipEmptyLines: true,
+    };
+
+    // Format records for CSV
+    const csvData = allRecords.map((record: any) => {
+      const row: Record<string, any> = {};
+      headers.forEach((header) => {
+        const value = record[header];
+        row[header] = value === undefined || value === null ? "" : value;
+      });
+      return row;
+    });
+
+    const csvContent = Papa.unparse(
+      {
+        fields: headers,
+        data: csvData,
+      },
+      csvConfig
+    );
+
+    // Upload to blob storage with unique filename including channel name
+    console.log("[Shared Options Export] Uploading CSV to blob storage");
+    const uniqueFilename = generateUniqueExportFilename(
+      job.id,
+      job.storeHash,
+      job.locale,
+      channelName,
+      "shared-options"
+    );
+    const { url } = await put(uniqueFilename, csvContent, {
+      access: "public",
+      contentType: "text/csv",
+      addRandomSuffix: false,
+    });
+
+    console.log(`[Shared Options Export] Upload complete. File URL: ${url}`);
+    return url;
+  } catch (error) {
+    console.error(
+      "[Shared Options Export] Job failed:",
+      JSON.stringify(error, null, 2)
+    );
+    // Log the error to the database
+    const errorWithResponse = error as Error & { response?: any };
+    await logTranslationError({
+      jobId: job.id,
+      entityId: 0,
+      lineNumber: 0,
+      errorType: "export_error",
+      errorMessage: errorWithResponse.message,
+      rawData: JSON.stringify({
+        jobId: job.id,
+        response: errorWithResponse.response,
+      }),
+    });
+    throw error;
+  }
+}
+
 // Remove POST handler and keep only GET handler
 export async function GET(request: NextRequest) {
   try {
@@ -1897,6 +2286,8 @@ export async function GET(request: NextRequest) {
             await processCategoryImportJob(job, graphqlClient);
           } else if (job.resourceType === "shared-modifiers") {
             await processSharedModifiersImportJob(job, graphqlClient);
+          } else if (job.resourceType === "shared-options") {
+            await processSharedOptionsImportJob(job, graphqlClient);
           } else {
             await processImportJob(job, graphqlClient);
           }
@@ -1910,6 +2301,12 @@ export async function GET(request: NextRequest) {
             );
           } else if (job.resourceType === "shared-modifiers") {
             fileUrl = await processSharedModifiersExportJob(
+              job,
+              graphqlClient,
+              restClient
+            );
+          } else if (job.resourceType === "shared-options") {
+            fileUrl = await processSharedOptionsExportJob(
               job,
               graphqlClient,
               restClient

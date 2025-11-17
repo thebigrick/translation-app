@@ -71,6 +71,7 @@ function transformGraphQLOptionsDataToLocaleData(
 
     acc[optionId] = {
       displayName: localeOption?.displayName || "",
+      isShared: edge.node.isShared || false,
       values: {},
     };
 
@@ -91,6 +92,9 @@ function transformGraphQLOptionsDataToLocaleData(
  * @returns {Object} An object containing:
  *   - options: Array of transformed options with their IDs, display names, and non-empty values
  *   - removedValues: Array of options and values to remove from overrides
+ * 
+ * NOTE: Shared options (isShared: true) are filtered out and not included in the mutation.
+ * They are managed globally and should only be updated through dedicated shared-option mutations.
  */
 function transformPostedOptionDataToGraphQLSchema(optionData: any) {
   if (!optionData.options) return { options: [], removedValues: [] };
@@ -98,6 +102,8 @@ function transformPostedOptionDataToGraphQLSchema(optionData: any) {
   const removedValues: any[] = [];
   
   const options = Object.entries(optionData.options)
+    // Filter out shared options - they should not be updated via product mutation
+    .filter(([_, optionDetails]: [string, any]) => !optionDetails.isShared)
     .map(([optionId, optionDetails]: [string, any]) => {
       // Track empty values
       const emptyValueIds: string[] = [];
@@ -166,6 +172,7 @@ function transformGraphQLOptionsResponse(optionsData: any) {
 
     acc[optionId] = {
       displayName: localeData?.displayName || "",
+      isShared: edge.node.isShared || false,
       values: {},
     };
 
@@ -812,6 +819,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ pid: 
           node: {
             id: edge.node?.id,
             displayName: edge.node?.displayName,
+            isShared: edge.node?.isShared || false,
             values: (edge.node?.values || []).map((value: any) => ({
               id: value?.id,
               label: value?.label,
