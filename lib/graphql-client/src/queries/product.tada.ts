@@ -60,6 +60,9 @@ export const GetProductLocaleDataDocument = graphql(`
     $productId: ID!
     $channelId: ID!
     $locale: String!
+    $optionsAfter: String
+    $modifiersAfter: String
+    $customFieldsAfter: String
   ) {
     store {
       __typename
@@ -82,25 +85,16 @@ export const GetProductLocaleDataDocument = graphql(`
         preOrderSettings {
           message
         }
-        options {
+        options(first: 10, after: $optionsAfter) {
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
           edges {
             node {
               __typename
               id
               isShared
-              displayName
-              values {
-                id
-                label
-                isDefault
-              }
-            }
-          }
-        }
-        options {
-          edges {
-            node {
-              id
               displayName
               values {
                 id
@@ -117,7 +111,11 @@ export const GetProductLocaleDataDocument = graphql(`
             }
           }
         }
-        modifiers {
+        modifiers(first: 10, after: $modifiersAfter) {
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
           edges {
             node {
               __typename
@@ -245,7 +243,11 @@ export const GetProductLocaleDataDocument = graphql(`
             }
           }
         }
-        customFields {
+        customFields(first: 10, after: $customFieldsAfter) {
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
           edges {
             node {
               id
@@ -525,10 +527,16 @@ export function createGetProductLocaleDataVariables(params: {
   pid: number;
   channelId: number;
   locale: string;
+  optionsAfter?: string | null;
+  modifiersAfter?: string | null;
+  customFieldsAfter?: string | null;
 }) {
   return {
     productId: formatProductId(params.pid),
     channelId: formatChannelId(params.channelId),
     locale: params.locale,
+    optionsAfter: params.optionsAfter ?? null,
+    modifiersAfter: params.modifiersAfter ?? null,
+    customFieldsAfter: params.customFieldsAfter ?? null,
   };
 }

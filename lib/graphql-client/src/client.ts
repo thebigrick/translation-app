@@ -451,24 +451,158 @@ export class GraphQLClient {
     type Response = ResultOf<typeof GetProductLocaleDataDocument>;
     type ProductType = NonNullable<Response["store"]>["product"];
 
-    const variables = createGetProductLocaleDataVariables({
-      pid: options.pid,
-      channelId: options.channelId,
-      locale: options.locale,
-    });
+    // Fetch all pages for options, modifiers, and customFields
+    let optionsAfter: string | null = null;
+    let modifiersAfter: string | null = null;
+    let customFieldsAfter: string | null = null;
+    
+    let allOptionsEdges: any[] = [];
+    let allModifiersEdges: any[] = [];
+    let allCustomFieldsEdges: any[] = [];
+    
+    let productData: ProductType | null = null;
 
-    const response = await this.request({
-      query: print(GetProductLocaleDataDocument),
-      variables,
-    });
-    const typedResponse = response as unknown as {
-      data: { store: { product: ProductType } };
-    };
+    // Fetch options with pagination
+    while (true) {
+      const variables = createGetProductLocaleDataVariables({
+        pid: options.pid,
+        channelId: options.channelId,
+        locale: options.locale,
+        optionsAfter,
+        modifiersAfter: null, // Only fetch modifiers on first call
+        customFieldsAfter: null, // Only fetch customFields on first call
+      });
 
-    if (!typedResponse.data?.store?.product) {
-      throw new Error("Product not found");
+      const response = await this.request({
+        query: print(GetProductLocaleDataDocument),
+        variables,
+      });
+      const typedResponse = response as unknown as {
+        data: { store: { product: ProductType } };
+      };
+
+      if (!typedResponse.data?.store?.product) {
+        throw new Error("Product not found");
+      }
+
+      const product = typedResponse.data.store.product;
+      
+      // Store product data on first call
+      if (!productData) {
+        productData = product;
+      }
+
+      // Collect options edges
+      if (product.options?.edges) {
+        allOptionsEdges.push(...product.options.edges);
+      }
+
+      // Check if there are more options pages
+      if (product.options?.pageInfo?.hasNextPage && product.options.pageInfo.endCursor) {
+        optionsAfter = product.options.pageInfo.endCursor;
+      } else {
+        break;
+      }
     }
-    return typedResponse.data.store.product;
+
+    // Reset cursors and fetch modifiers with pagination
+    modifiersAfter = null;
+    while (true) {
+      const variables = createGetProductLocaleDataVariables({
+        pid: options.pid,
+        channelId: options.channelId,
+        locale: options.locale,
+        optionsAfter: null, // Options already fetched
+        modifiersAfter,
+        customFieldsAfter: null, // Only fetch customFields on first call
+      });
+
+      const response = await this.request({
+        query: print(GetProductLocaleDataDocument),
+        variables,
+      });
+      const typedResponse = response as unknown as {
+        data: { store: { product: ProductType } };
+      };
+
+      const product = typedResponse.data.store.product;
+
+      if (!product) {
+        break;
+      }
+
+      // Collect modifiers edges
+      if (product.modifiers?.edges) {
+        allModifiersEdges.push(...product.modifiers.edges);
+      }
+
+      // Check if there are more modifiers pages
+      if (product.modifiers?.pageInfo?.hasNextPage && product.modifiers.pageInfo.endCursor) {
+        modifiersAfter = product.modifiers.pageInfo.endCursor;
+      } else {
+        break;
+      }
+    }
+
+    // Reset cursors and fetch customFields with pagination
+    customFieldsAfter = null;
+    while (true) {
+      const variables = createGetProductLocaleDataVariables({
+        pid: options.pid,
+        channelId: options.channelId,
+        locale: options.locale,
+        optionsAfter: null, // Options already fetched
+        modifiersAfter: null, // Modifiers already fetched
+        customFieldsAfter,
+      });
+
+      const response = await this.request({
+        query: print(GetProductLocaleDataDocument),
+        variables,
+      });
+      const typedResponse = response as unknown as {
+        data: { store: { product: ProductType } };
+      };
+
+      const product = typedResponse.data.store.product;
+
+      if (!product) {
+        break;
+      }
+
+      // Collect customFields edges
+      if (product.customFields?.edges) {
+        allCustomFieldsEdges.push(...product.customFields.edges);
+      }
+
+      // Check if there are more customFields pages
+      if (product.customFields?.pageInfo?.hasNextPage && product.customFields.pageInfo.endCursor) {
+        customFieldsAfter = product.customFields.pageInfo.endCursor;
+      } else {
+        break;
+      }
+    }
+
+    // Merge all paginated results into the product data
+    if (productData) {
+      return {
+        ...productData,
+        options: {
+          ...productData.options,
+          edges: allOptionsEdges,
+        },
+        modifiers: {
+          ...productData.modifiers,
+          edges: allModifiersEdges,
+        },
+        customFields: {
+          ...productData.customFields,
+          edges: allCustomFieldsEdges,
+        },
+      };
+    }
+
+    throw new Error("Product not found");
   }
 
   async NOTADA_updateProductLocaleData(

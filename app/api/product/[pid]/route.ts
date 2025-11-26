@@ -1130,11 +1130,32 @@ export async function PUT(request: NextRequest, props: { params: Promise<{ pid: 
           },
         };
 
-        const gqlData: any = await graphQLClient.NOTADA_updateProductLocaleData(
-          graphVariables
+        // Process mutations in batches if there are more than 10 items
+        const transformedOptions = transformPostedOptionDataToGraphQLSchema(optionData);
+        const transformedModifiers = transformPostedModifierDataToGraphQLSchema(modifierData);
+        const transformedCustomFields = transformPostedCustomFieldDataToGraphQLSchema(
+          customFieldData,
+          channelId,
+          body.locale
         );
 
-        result = {
+        const BATCH_SIZE = 10;
+        let finalResult: any = {};
+
+        // First, process basic info, SEO, storefront, and preOrder (these don't have limits)
+        const basicInfoVariables = {
+          ...graphVariables,
+          optionsInput: undefined,
+          removedOptionsInput: undefined,
+          modifiersInput: undefined,
+          removedModifiersInput: undefined,
+          customFieldsInput: undefined,
+        };
+        const gqlData: any = await graphQLClient.NOTADA_updateProductLocaleData(
+          basicInfoVariables
+        );
+
+        finalResult = {
           ...gqlData?.data?.product?.setProductBasicInformation?.product
             ?.overridesForLocale?.basicInformation,
           ...gqlData?.data?.product?.setProductSeoInformation?.product
@@ -1143,16 +1164,157 @@ export async function PUT(request: NextRequest, props: { params: Promise<{ pid: 
             ?.overridesForLocale?.preOrderSettings?.message,
           ...gqlData?.data?.product?.setProductStorefrontDetails?.product
             ?.overridesForLocale?.storefrontDetails,
-          options: transformGraphQLOptionsResponse(
-            gqlData?.data?.product?.setProductOptionsInformation?.product?.options
-          ),
-          modifiers: transformGraphQLModifiersResponse(
-            gqlData?.data?.product?.setProductModifiersInformation?.product?.modifiers
-          ),
-          customFields: transformGraphQLCustomFieldsResponse(
-            gqlData?.data?.product?.updateProductCustomFields?.product
-              ?.customFields
-          ),
+        };
+
+        // Process removed options first
+        if (transformedOptions.removedValues.length > 0) {
+          const removedOptionsVariables = {
+            ...graphVariables,
+            removedOptionsInput: {
+              productId: `bc/store/product/${pid}`,
+              localeContext: {
+                channelId: `bc/store/channel/${channelId}`,
+                locale: body.locale,
+              },
+              data: {
+                options: transformedOptions.removedValues,
+              },
+            },
+            optionsInput: undefined,
+            modifiersInput: undefined,
+            removedModifiersInput: undefined,
+            customFieldsInput: undefined,
+          };
+          await graphQLClient.NOTADA_updateProductLocaleData(removedOptionsVariables);
+        }
+
+        // Process options in batches
+        if (transformedOptions.options.length > 0) {
+          for (let i = 0; i < transformedOptions.options.length; i += BATCH_SIZE) {
+            const batch = transformedOptions.options.slice(i, i + BATCH_SIZE);
+            const batchVariables = {
+              ...graphVariables,
+              optionsInput: {
+                productId: `bc/store/product/${pid}`,
+                localeContext: {
+                  channelId: `bc/store/channel/${channelId}`,
+                  locale: body.locale,
+                },
+                data: {
+                  options: batch,
+                },
+              },
+              removedOptionsInput: undefined,
+              modifiersInput: undefined,
+              removedModifiersInput: undefined,
+              customFieldsInput: undefined,
+            };
+            const batchResult: any = await graphQLClient.NOTADA_updateProductLocaleData(batchVariables);
+            if (batchResult?.data?.product?.setProductOptionsInformation?.product?.options) {
+              finalResult.options = transformGraphQLOptionsResponse(
+                batchResult.data.product.setProductOptionsInformation.product.options
+              );
+            }
+          }
+        }
+
+        // Process removed modifiers first
+        if (transformedModifiers.removedValues.length > 0) {
+          const removedModifiersVariables = {
+            ...graphVariables,
+            removedModifiersInput: {
+              productId: `bc/store/product/${pid}`,
+              localeContext: {
+                channelId: `bc/store/channel/${channelId}`,
+                locale: body.locale,
+              },
+              data: {
+                modifiers: transformedModifiers.removedValues,
+              },
+            },
+            optionsInput: undefined,
+            removedOptionsInput: undefined,
+            modifiersInput: undefined,
+            customFieldsInput: undefined,
+          };
+          await graphQLClient.NOTADA_updateProductLocaleData(removedModifiersVariables);
+        }
+
+        // Process modifiers in batches
+        if (transformedModifiers.modifiers.length > 0) {
+          for (let i = 0; i < transformedModifiers.modifiers.length; i += BATCH_SIZE) {
+            const batch = transformedModifiers.modifiers.slice(i, i + BATCH_SIZE);
+            const batchVariables = {
+              ...graphVariables,
+              modifiersInput: {
+                productId: `bc/store/product/${pid}`,
+                localeContext: {
+                  channelId: `bc/store/channel/${channelId}`,
+                  locale: body.locale,
+                },
+                data: {
+                  modifiers: batch,
+                },
+              },
+              optionsInput: undefined,
+              removedOptionsInput: undefined,
+              removedModifiersInput: undefined,
+              customFieldsInput: undefined,
+            };
+            const batchResult: any = await graphQLClient.NOTADA_updateProductLocaleData(batchVariables);
+            if (batchResult?.data?.product?.setProductModifiersInformation?.product?.modifiers) {
+              finalResult.modifiers = transformGraphQLModifiersResponse(
+                batchResult.data.product.setProductModifiersInformation.product.modifiers
+              );
+            }
+          }
+        }
+
+        // Process customFields in batches
+        if (transformedCustomFields.length > 0) {
+          for (let i = 0; i < transformedCustomFields.length; i += BATCH_SIZE) {
+            const batch = transformedCustomFields.slice(i, i + BATCH_SIZE);
+            const batchVariables = {
+              ...graphVariables,
+              customFieldsInput: {
+                productId: `bc/store/product/${pid}`,
+                data: batch,
+              },
+              optionsInput: undefined,
+              removedOptionsInput: undefined,
+              modifiersInput: undefined,
+              removedModifiersInput: undefined,
+            };
+            const batchResult: any = await graphQLClient.NOTADA_updateProductLocaleData(batchVariables);
+            if (batchResult?.data?.product?.updateProductCustomFields?.product?.customFields) {
+              finalResult.customFields = transformGraphQLCustomFieldsResponse(
+                batchResult.data.product.updateProductCustomFields.product.customFields
+              );
+            }
+          }
+        }
+
+        // After all mutations, fetch the complete product data with pagination
+        // to ensure we return all updated items, not just the first 10
+        const { availableLocales } = await getChannelLocales(context, channelId);
+        const updatedProductData = await graphQLClient.getProductLocaleData({
+          pid: Number(pid),
+          channelId: Number(channelId),
+          locale: body.locale,
+          availableLocales,
+          defaultLocale,
+        });
+
+        // Transform the complete data
+        const updatedOptions = updatedProductData?.options?.edges || [];
+        const updatedModifiers = updatedProductData?.modifiers?.edges || [];
+        const updatedCustomFields = updatedProductData?.customFields?.edges || [];
+
+        result = {
+          ...finalResult,
+          options: transformGraphQLOptionsResponse({ edges: updatedOptions }),
+          modifiers: transformGraphQLModifiersResponse({ edges: updatedModifiers }),
+          customFields: transformGraphQLCustomFieldsResponse({ edges: updatedCustomFields }),
         };
       // } else {
       //   // For basic product information updates, use the new simplified interface
