@@ -397,7 +397,7 @@ const CONFIG = {
   REQUESTS_PER_SECOND: Number(process.env.TRANSLATION_REQUESTS_PER_SECOND) || 5,
 
   // Pagination settings
-  PRODUCTS_PER_PAGE: Number(process.env.TRANSLATION_PRODUCTS_PER_PAGE) || 100,
+  PRODUCTS_PER_PAGE: Number(process.env.TRANSLATION_PRODUCTS_PER_PAGE) || 50,
   CATEGORIES_PER_PAGE:
     Number(process.env.TRANSLATION_CATEGORIES_PER_PAGE) || 50,
   SHARED_MODIFIERS_PER_PAGE:
@@ -1028,28 +1028,93 @@ async function processExportJob(
       fallbackLocale.code;
     console.log(`[Export] Using default locale: ${defaultLocale}`);
 
-    // Get products from channel
+    // Get products from channel with pagination
     console.log(`[Export] Fetching products for channel ${job.channelId}`);
-
-    const productAssignments = await restClient.getChannelProductAssignments(
-      job.channelId
+    
+    const allProductAssignments: any[] = [];
+    let page = 1;
+    const limit = CONFIG.PRODUCTS_PER_PAGE; // Use configurable page size from .env
+    
+    console.log(
+      `[Export] Using page size: ${limit} (from TRANSLATION_PRODUCTS_PER_PAGE env var)`
     );
+    
+    while (true) {
+      const productAssignmentsPage = await restClient.getChannelProductAssignments(
+        job.channelId,
+        limit,
+        page
+      ) as {data: any[]; meta?: {pagination?: any}};
+      
+      const assignments = productAssignmentsPage.data || [];
+      console.log(
+        `[Export] Page ${page} returned ${assignments.length} product assignments`
+      );
+      
+      allProductAssignments.push(...assignments);
+      
+      // Check if there are more pages
+      const pagination = productAssignmentsPage.meta?.pagination;
+      if (pagination) {
+        const totalPages = pagination.total_pages || 1;
+        const currentPage = pagination.current_page || page;
+        
+        console.log(
+          `[Export] Pagination info: page ${currentPage} of ${totalPages}, total items: ${pagination.total || 'unknown'}`
+        );
+        
+        if (currentPage < totalPages && assignments.length > 0) {
+          page += 1;
+          console.log(
+            `[Export] Waiting ${CONFIG.MIN_DELAY_BETWEEN_PAGES}ms before fetching next page`
+          );
+          await new Promise((resolve) =>
+            setTimeout(resolve, CONFIG.MIN_DELAY_BETWEEN_PAGES)
+          );
+        } else {
+          console.log(`[Export] Reached last page (${currentPage} of ${totalPages})`);
+          break;
+        }
+      } else {
+        // If no pagination metadata, use heuristics:
+        // - If we got less than the limit, we're done
+        // - If we got exactly the limit, try one more page to check
+        if (assignments.length < limit) {
+          console.log(
+            `[Export] No pagination metadata, but got ${assignments.length} items (less than limit ${limit}), assuming last page`
+          );
+          break;
+        }
+        // If we got exactly the limit, there might be more pages
+        if (assignments.length === limit) {
+          page += 1;
+          console.log(
+            `[Export] No pagination metadata, checking page ${page} (got ${limit} items on previous page)`
+          );
+          await new Promise((resolve) =>
+            setTimeout(resolve, CONFIG.MIN_DELAY_BETWEEN_PAGES)
+          );
+        } else {
+          break;
+        }
+      }
+    }
 
     console.log(
-      `[Export] Found ${productAssignments.data?.length || 0} products`
+      `[Export] Found ${allProductAssignments.length} total product assignments`
     );
 
-    if (!productAssignments.data?.length) {
+    if (!allProductAssignments.length) {
       throw new Error("No products found for export");
     }
 
     // Get translations for each product
     console.log(
-      `[Export] Fetching translations for ${productAssignments.data?.length} products in locale ${job.locale}`
+      `[Export] Fetching translations for ${allProductAssignments.length} products in locale ${job.locale}`
     );
 
     const translatedProducts = await Promise.all(
-      productAssignments.data.map(
+      allProductAssignments.map(
         async (assignment: { channel_id: number; product_id: number }) => {
           const productId = assignment.product_id;
 

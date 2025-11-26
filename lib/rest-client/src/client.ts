@@ -185,10 +185,27 @@ export class BigCommerceRestClient {
     return this.request<{data: any}>(`/v3/channels/${channelId}`, { method: "GET" });
   }
 
-  async getChannelProductAssignments(channelId: number) {
-    return this.request<{data: any[]}>(`/v3/catalog/products/channel-assignments?channel_id:in=${channelId}`, {
-      method: "GET",
-    });
+  async getChannelProductAssignments(
+    channelId: number,
+    limit?: number,
+    page?: number
+  ) {
+    const queryParams = new URLSearchParams();
+    queryParams.append(`channel_id:in`, channelId.toString());
+    
+    if (limit !== undefined) {
+      queryParams.append('limit', limit.toString());
+    }
+    if (page !== undefined) {
+      queryParams.append('page', page.toString());
+    }
+    
+    return this.request<{data: any[]; meta?: {pagination?: any}}>(
+      `/v3/catalog/products/channel-assignments?${queryParams.toString()}`,
+      {
+        method: "GET",
+      }
+    );
   }
 
   async getChannelLocales(channelId: number) {
