@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { dbClient as db } from "@/lib/db";
-import { put } from "@vercel/blob";
+import { put, del } from "@vercel/blob";
 import { createGraphQLClient } from "@bigcommerce/translations-graphql-client";
 import type { GraphQLClient } from "@bigcommerce/translations-graphql-client";
 import {
@@ -393,8 +393,10 @@ function stringifyCSV(
 // Configuration from environment variables with defaults
 const CONFIG = {
   // Rate limiting settings
-  CONCURRENT_REQUESTS: Number(process.env.TRANSLATION_CONCURRENT_REQUESTS) || 3,
-  REQUESTS_PER_SECOND: Number(process.env.TRANSLATION_REQUESTS_PER_SECOND) || 5,
+  // Separate concurrent requests for export and import
+  CONCURRENT_REQUESTS_EXPORT: Number(process.env.TRANSLATION_CONCURRENT_REQUESTS_EXPORT) || Number(process.env.TRANSLATION_CONCURRENT_REQUESTS) || 10,
+  CONCURRENT_REQUESTS_IMPORT: Number(process.env.TRANSLATION_CONCURRENT_REQUESTS_IMPORT) || Number(process.env.TRANSLATION_CONCURRENT_REQUESTS) || 10,
+  REQUESTS_PER_SECOND: Number(process.env.TRANSLATION_REQUESTS_PER_SECOND) || 30,
 
   // Pagination settings
   PRODUCTS_PER_PAGE: Number(process.env.TRANSLATION_PRODUCTS_PER_PAGE) || 50,
@@ -411,6 +413,10 @@ const CONFIG = {
 
   // Delay settings (in milliseconds)
   MIN_DELAY_BETWEEN_PAGES: Number(process.env.TRANSLATION_PAGE_DELAY_MS) || 200,
+
+  // Chunk processing settings
+  MAX_PRODUCTS_PER_EXPORT_CHUNK: Number(process.env.TRANSLATION_MAX_PRODUCTS_PER_EXPORT_CHUNK) || 1000,
+  MAX_PRODUCTS_PER_IMPORT_CHUNK: Number(process.env.TRANSLATION_MAX_PRODUCTS_PER_IMPORT_CHUNK) || 500,
 };
 
 // Validate configuration
@@ -426,7 +432,7 @@ Object.entries(CONFIG).forEach(([key, value]) => {
 async function processBatch<T, R>(
   items: T[],
   processItem: (item: T) => Promise<R>,
-  { batchSize = CONFIG.CONCURRENT_REQUESTS } = {}
+  { batchSize = CONFIG.CONCURRENT_REQUESTS_IMPORT } = {}
 ): Promise<R[]> {
   const results: R[] = [];
   const errors: Error[] = [];
@@ -607,7 +613,251 @@ interface ProductLocaleUpdateVariables {
   };
 }
 
-// Process an import job
+// Helper function to process a single product import record
+async function processImportRecord(
+  record: TranslationRecord,
+  job: TranslationJob,
+  graphqlClient: GraphQLClient
+): Promise<void> {
+
+  const productData = prepareProductData(
+    record,
+    job.locale,
+    job.channelId
+  );
+
+  // Format IDs for GraphQL
+  const formattedChannelId = formatChannelId(job.channelId);
+  const formattedProductId = formatProductId(record.productId);
+
+  // Get fields to remove based on empty values
+  const basicInfoFieldsToRemove = getBasicInformationFieldsToRemove({
+    name: productData.name,
+    description: productData.description,
+  });
+
+  const seoFieldsToRemove = getSeoInformationFieldsToRemove({
+    pageTitle: productData.pageTitle,
+    metaDescription: productData.metaDescription,
+  });
+
+  const storefrontFieldsToRemove = getStorefrontDetailsFieldsToRemove({
+    warranty: productData.warranty,
+    availabilityDescription: productData.availabilityDescription,
+    searchKeywords: productData.searchKeywords,
+  });
+
+  const preOrderFieldsToRemove = getPreOrderSettingsFieldsToRemove({
+    preOrderMessage: productData.preOrderMessage,
+  });
+
+  const customFieldsToRemove = getCustomFieldsToRemove({
+    customFields: productData.customFields.reduce(
+      (acc: any, field: any) => {
+        if (field.customFieldId) {
+          acc[field.customFieldId] = {
+            name: field.overrides?.[0]?.channelLocaleOverrides?.data?.name,
+            value:
+              field.overrides?.[0]?.channelLocaleOverrides?.data?.value,
+          };
+        }
+        return acc;
+      },
+      {}
+    ),
+  });
+
+  // Prepare input variables for the mutation
+  const variables: ProductLocaleUpdateVariables = {
+    channelId: formattedChannelId,
+    locale: job.locale,
+
+    // Basic Information
+    input: {
+      productId: formattedProductId,
+      localeContext: {
+        channelId: formattedChannelId,
+        locale: job.locale,
+      },
+      data: {
+        name: productData.name,
+        description: productData.description,
+      },
+    },
+
+    // SEO Information
+    seoInput: {
+      productId: formattedProductId,
+      localeContext: {
+        channelId: formattedChannelId,
+        locale: job.locale,
+      },
+      data: {
+        pageTitle: productData.pageTitle,
+        metaDescription: productData.metaDescription,
+      },
+    },
+
+    // Pre-order Settings
+    preOrderInput: {
+      productId: formattedProductId,
+      localeContext: {
+        channelId: formattedChannelId,
+        locale: job.locale,
+      },
+      data: {
+        message: productData.preOrderMessage,
+      },
+    },
+
+    // Storefront Details
+    storefrontInput: {
+      productId: formattedProductId,
+      localeContext: {
+        channelId: formattedChannelId,
+        locale: job.locale,
+      },
+      data: {
+        warranty: productData.warranty,
+        availabilityDescription: productData.availabilityDescription,
+        searchKeywords: productData.searchKeywords,
+      },
+    },
+  };
+
+  // Add options if present
+  if (productData.options?.length > 0) {
+    variables.optionsInput = {
+      productId: formattedProductId,
+      localeContext: {
+        channelId: formattedChannelId,
+        locale: job.locale,
+      },
+      data: {
+        options: productData.options,
+      },
+    };
+  }
+
+  // Add modifiers if present
+  if (productData.modifiers?.length > 0) {
+    variables.modifiersInput = {
+      productId: formattedProductId,
+      localeContext: {
+        channelId: formattedChannelId,
+        locale: job.locale,
+      },
+      data: { modifiers: productData.modifiers },
+    };
+  }
+
+  // Add custom fields if present
+  if (productData.customFields?.length > 0) {
+    variables.customFieldsInput = {
+      productId: formattedProductId,
+      data: productData.customFields,
+    };
+  }
+
+  // Add removal inputs for fields that should be removed
+  if (basicInfoFieldsToRemove.length > 0) {
+    variables.removedBasicInfoInput = {
+      productId: formattedProductId,
+      localeContext: {
+        channelId: formattedChannelId,
+        locale: job.locale,
+      },
+      overridesToRemove: basicInfoFieldsToRemove,
+    };
+  }
+
+  if (seoFieldsToRemove.length > 0) {
+    variables.removedSeoInput = {
+      productId: formattedProductId,
+      localeContext: {
+        channelId: formattedChannelId,
+        locale: job.locale,
+      },
+      overridesToRemove: seoFieldsToRemove,
+    };
+  }
+
+  if (storefrontFieldsToRemove.length > 0) {
+    variables.removedStorefrontDetailsInput = {
+      productId: formattedProductId,
+      localeContext: {
+        channelId: formattedChannelId,
+        locale: job.locale,
+      },
+      overridesToRemove: storefrontFieldsToRemove,
+    };
+  }
+
+  if (preOrderFieldsToRemove.length > 0) {
+    variables.removedPreOrderInput = {
+      productId: formattedProductId,
+      localeContext: {
+        channelId: formattedChannelId,
+        locale: job.locale,
+      },
+      overridesToRemove: preOrderFieldsToRemove,
+    };
+  }
+
+  if (customFieldsToRemove.length > 0) {
+    variables.removedCustomFieldsInput = {
+      productId: formattedProductId,
+      data: customFieldsToRemove.map((field) => ({
+        customFieldId: field.customFieldId,
+        channelLocaleContextData: {
+          context: {
+            channelId: formattedChannelId,
+            locale: job.locale,
+          },
+          attributes: field.fields,
+        },
+      })),
+    };
+  }
+
+  // Call the mutation with retry logic (same as export)
+  await updateProductLocaleDataWithRetry(variables, graphqlClient, record.productId);
+}
+
+// Helper function to update product locale data with retry logic
+async function updateProductLocaleDataWithRetry(
+  variables: ProductLocaleUpdateVariables,
+  graphqlClient: GraphQLClient,
+  productId: number,
+  maxRetries: number = 3
+): Promise<void> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await graphqlClient.NOTADA_updateProductLocaleData(variables);
+      return;
+    } catch (error) {
+      lastError = error as Error;
+      if (attempt < maxRetries) {
+        console.log(
+          `[Import] Error updating product ${productId} (attempt ${attempt}/${maxRetries}), retrying after 100ms...`
+        );
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      } else {
+        console.error(
+          `[Import] Failed to update product ${productId} after ${maxRetries} attempts:`,
+          lastError
+        );
+        throw lastError;
+      }
+    }
+  }
+  
+  throw lastError || new Error(`Failed to update product ${productId} after ${maxRetries} attempts`);
+}
+
+// Process an import job with chunking support
 async function processImportJob(
   job: TranslationJob,
   graphqlClient: GraphQLClient
@@ -632,9 +882,6 @@ async function processImportJob(
     });
 
     // Fetch channel locales to get default locale
-    console.log(
-      `[Import] Fetching channel locales for channel ${job.channelId}`
-    );
     const { data: localesData } = await restClient.getChannelLocales(
       job.channelId
     );
@@ -643,258 +890,158 @@ async function processImportJob(
       fallbackLocale.code;
     console.log(`[Import] Using default locale: ${defaultLocale}`);
 
-    // Fetch CSV file
-    console.log(`[Import] Fetching CSV from ${job.fileUrl}`);
-    const response = await fetch(job.fileUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch CSV file: ${response.statusText}`);
+    // Check if this is a chunked import in progress
+    const chunkMetadata = getImportChunkMetadata(job);
+    
+    let allRecords: TranslationRecord[];
+    let processedProducts: number;
+
+    if (chunkMetadata && !chunkMetadata.isComplete) {
+      // Continue from existing chunk
+      console.log(
+        `[Import] Resuming chunked import: processed ${chunkMetadata.processedProducts} of ${chunkMetadata.totalProducts} products`
+      );
+      
+      // Fetch CSV file again (we need all records to get the chunk)
+      const response = await fetch(job.fileUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch CSV file: ${response.statusText}`);
+      }
+      const csvContent = await response.text();
+      allRecords = await parseCSV<TranslationRecord>(csvContent);
+      processedProducts = chunkMetadata.processedProducts;
+    } else {
+      // Start new chunked import
+      console.log(`[Import] Starting new chunked import`);
+      
+      // Fetch CSV file
+      const response = await fetch(job.fileUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch CSV file: ${response.statusText}`);
+      }
+
+      const csvContent = await response.text();
+      console.log("[Import] Parsing CSV content");
+      allRecords = await parseCSV<TranslationRecord>(csvContent);
+      console.log(`[Import] Found ${allRecords.length} records to import`);
+      
+      processedProducts = 0;
     }
 
-    const csvContent = await response.text();
-    console.log("[Import] Parsing CSV content");
-    const records = await parseCSV<TranslationRecord>(csvContent);
-    console.log(`[Import] Found ${records.length} records to import`);
+    // Calculate chunk boundaries - process ONLY ONE chunk per cron execution
+    // This ensures we don't exceed Vercel timeout limits
+    const chunkStart = processedProducts;
+    const chunkEnd = Math.min(
+      chunkStart + CONFIG.MAX_PRODUCTS_PER_IMPORT_CHUNK,
+      allRecords.length
+    );
+    const chunkRecords = allRecords.slice(chunkStart, chunkEnd);
 
-    // Process records in batches with rate limiting
-    console.log("[Import] Starting batch processing of records");
-    await processBatch(records, async (record: TranslationRecord) => {
-      try {
-        console.log(`[Import] Updating product ${record.productId}`);
+    console.log(
+      `[Import] Starting to process chunk: products ${chunkStart + 1}-${chunkEnd} of ${allRecords.length} - ONE CHUNK PER CRON EXECUTION`
+    );
+    console.log(
+      `[Import] Processing with ${CONFIG.CONCURRENT_REQUESTS_IMPORT} concurrent requests, retry on error (max 3 attempts, 100ms delay)`
+    );
 
-        const productData = prepareProductData(
-          record,
-          job.locale,
-          job.channelId
-        );
+    // Process records in batches with progress logging
+    const batchSize = CONFIG.CONCURRENT_REQUESTS_IMPORT;
+    const progressInterval = CONFIG.IMPORT_BATCH_SIZE;
+    let processedCount = 0;
+    const errors: Error[] = [];
 
-        // Format IDs for GraphQL
-        const formattedChannelId = formatChannelId(job.channelId);
-        const formattedProductId = formatProductId(record.productId);
+    // Process items in batches
+    for (let i = 0; i < chunkRecords.length; i += batchSize) {
+      const batch = chunkRecords.slice(i, i + batchSize);
 
-        // Get fields to remove based on empty values
-        const basicInfoFieldsToRemove = getBasicInformationFieldsToRemove({
-          name: productData.name,
-          description: productData.description,
-        });
+      // Process batch concurrently
+      const batchResults = await Promise.allSettled(
+        batch.map(async (record: TranslationRecord) => {
+          try {
+            await processImportRecord(record, job, graphqlClient);
+          } catch (error) {
+            console.error(
+              `[Import] Error updating product ${record.productId}:`,
+              error
+            );
+            const errorWithResponse = error as Error & {
+              response?: any;
+              errors?: any;
+            };
+            await logTranslationError({
+              jobId: job.id,
+              entityId: record.productId,
+              lineNumber: 0,
+              errorType: "api_error",
+              errorMessage: errorWithResponse.message,
+              rawData: JSON.stringify({
+                record,
+                response: errorWithResponse.errors,
+              }),
+            });
+            throw error;
+          }
+        })
+      );
 
-        const seoFieldsToRemove = getSeoInformationFieldsToRemove({
-          pageTitle: productData.pageTitle,
-          metaDescription: productData.metaDescription,
-        });
-
-        const storefrontFieldsToRemove = getStorefrontDetailsFieldsToRemove({
-          warranty: productData.warranty,
-          availabilityDescription: productData.availabilityDescription,
-          searchKeywords: productData.searchKeywords,
-        });
-
-        const preOrderFieldsToRemove = getPreOrderSettingsFieldsToRemove({
-          preOrderMessage: productData.preOrderMessage,
-        });
-
-        const customFieldsToRemove = getCustomFieldsToRemove({
-          customFields: productData.customFields.reduce(
-            (acc: any, field: any) => {
-              if (field.customFieldId) {
-                acc[field.customFieldId] = {
-                  name: field.overrides?.[0]?.channelLocaleOverrides?.data
-                    ?.name,
-                  value:
-                    field.overrides?.[0]?.channelLocaleOverrides?.data?.value,
-                };
-              }
-              return acc;
-            },
-            {}
-          ),
-        });
-
-        // Prepare input variables for the mutation
-        const variables: ProductLocaleUpdateVariables = {
-          channelId: formattedChannelId,
-          locale: job.locale,
-
-          // Basic Information
-          input: {
-            productId: formattedProductId,
-            localeContext: {
-              channelId: formattedChannelId,
-              locale: job.locale,
-            },
-            data: {
-              name: productData.name,
-              description: productData.description,
-            },
-          },
-
-          // SEO Information
-          seoInput: {
-            productId: formattedProductId,
-            localeContext: {
-              channelId: formattedChannelId,
-              locale: job.locale,
-            },
-            data: {
-              pageTitle: productData.pageTitle,
-              metaDescription: productData.metaDescription,
-            },
-          },
-
-          // Pre-order Settings
-          preOrderInput: {
-            productId: formattedProductId,
-            localeContext: {
-              channelId: formattedChannelId,
-              locale: job.locale,
-            },
-            data: {
-              message: productData.preOrderMessage,
-            },
-          },
-
-          // Storefront Details
-          storefrontInput: {
-            productId: formattedProductId,
-            localeContext: {
-              channelId: formattedChannelId,
-              locale: job.locale,
-            },
-            data: {
-              warranty: productData.warranty,
-              availabilityDescription: productData.availabilityDescription,
-              searchKeywords: productData.searchKeywords,
-            },
-          },
-        };
-
-        // Add options if present
-        if (productData.options?.length > 0) {
-          variables.optionsInput = {
-            productId: formattedProductId,
-            localeContext: {
-              channelId: formattedChannelId,
-              locale: job.locale,
-            },
-            data: {
-              options: productData.options,
-            },
-          };
+      // Handle results and errors
+      batchResults.forEach((result) => {
+        if (result.status === "fulfilled") {
+          processedCount++;
+        } else {
+          errors.push(result.reason);
+          processedCount++;
         }
+      });
 
-        // Add modifiers if present
-        if (productData.modifiers?.length > 0) {
-          variables.modifiersInput = {
-            productId: formattedProductId,
-            localeContext: {
-              channelId: formattedChannelId,
-              locale: job.locale,
-            },
-            data: { modifiers: productData.modifiers },
-          };
-        }
-
-        // Add custom fields if present
-        if (productData.customFields?.length > 0) {
-          variables.customFieldsInput = {
-            productId: formattedProductId,
-            data: productData.customFields,
-          };
-        }
-
-        // Add removal inputs for fields that should be removed
-        if (basicInfoFieldsToRemove.length > 0) {
-          variables.removedBasicInfoInput = {
-            productId: formattedProductId,
-            localeContext: {
-              channelId: formattedChannelId,
-              locale: job.locale,
-            },
-            overridesToRemove: basicInfoFieldsToRemove,
-          };
-        }
-
-        if (seoFieldsToRemove.length > 0) {
-          variables.removedSeoInput = {
-            productId: formattedProductId,
-            localeContext: {
-              channelId: formattedChannelId,
-              locale: job.locale,
-            },
-            overridesToRemove: seoFieldsToRemove,
-          };
-        }
-
-        if (storefrontFieldsToRemove.length > 0) {
-          variables.removedStorefrontDetailsInput = {
-            productId: formattedProductId,
-            localeContext: {
-              channelId: formattedChannelId,
-              locale: job.locale,
-            },
-            overridesToRemove: storefrontFieldsToRemove,
-          };
-        }
-
-        if (preOrderFieldsToRemove.length > 0) {
-          variables.removedPreOrderInput = {
-            productId: formattedProductId,
-            localeContext: {
-              channelId: formattedChannelId,
-              locale: job.locale,
-            },
-            overridesToRemove: preOrderFieldsToRemove,
-          };
-        }
-
-        if (customFieldsToRemove.length > 0) {
-          variables.removedCustomFieldsInput = {
-            productId: formattedProductId,
-            data: customFieldsToRemove.map((field) => ({
-              customFieldId: field.customFieldId,
-              channelLocaleContextData: {
-                context: {
-                  channelId: formattedChannelId,
-                  locale: job.locale,
-                },
-                attributes: field.fields,
-              },
-            })),
-          };
-        }
-
-        // Call the mutation and capture the response
-        const response = await graphqlClient.NOTADA_updateProductLocaleData(
-          variables
-        );
+      // Log progress every N products
+      if (processedCount % progressInterval === 0 || processedCount === chunkRecords.length) {
+        const percentage = Math.round((processedCount / chunkRecords.length) * 100);
         console.log(
-          `[Import] Successfully updated product ${record.productId}`
+          `[Import] Progress: ${processedCount}/${chunkRecords.length} products processed (${percentage}%)`
         );
-      } catch (error) {
-        console.error(
-          `[Import] Error updating product ${record.productId}:`,
-          error
-        );
-        const errorWithResponse = error as Error & {
-          response?: any;
-          errors?: any;
-        };
-        // Log the error to the database, including the GraphQL response
-        await logTranslationError({
-          jobId: job.id,
-          entityId: record.productId,
-          lineNumber: 0, // Assuming line number is not applicable here
-          errorType: "api_error",
-          errorMessage: errorWithResponse.message,
-          rawData: JSON.stringify({
-            record,
-            response: errorWithResponse.errors,
-          }),
-        });
-        throw error;
       }
-    });
+    }
 
-    console.log(`[Import] Job ${job.id} completed successfully`);
+    if (errors.length > 0) {
+      console.warn(
+        `[Import] Completed with ${errors.length} errors out of ${chunkRecords.length} products`
+      );
+    }
+
+    console.log(
+      `[Import] Completed processing chunk: ${chunkRecords.length} products processed (${chunkStart + 1}-${chunkEnd} of ${allRecords.length})`
+    );
+
+    const newProcessedProducts = chunkEnd;
+    const isComplete = newProcessedProducts >= allRecords.length;
+
+    if (isComplete) {
+      console.log(`[Import] Job ${job.id} completed successfully`);
+      
+      // Update job metadata to mark as complete
+      await db.updateTranslationJob(job.id, {
+        metadata: {
+          processedProducts: newProcessedProducts,
+          totalProducts: allRecords.length,
+          isComplete: true,
+        } as ImportChunkMetadata,
+      });
+    } else {
+      // Update job metadata for next chunk
+      await db.updateTranslationJob(job.id, {
+        status: "pending", // Keep as pending so next cron picks it up
+        metadata: {
+          processedProducts: newProcessedProducts,
+          totalProducts: allRecords.length,
+          isComplete: false,
+        } as ImportChunkMetadata,
+      });
+
+      console.log(
+        `[Import] Chunk completed. Processed ${newProcessedProducts} of ${allRecords.length} products. Job will be picked up by next cron.`
+      );
+    }
   } catch (error) {
     console.error("[Import] Job failed:", error);
     throw error;
@@ -997,7 +1144,414 @@ function generateUniqueExportFilename(
   return `exports/${storeHash}/${timestamp}-${randomBytes}-${descriptiveFilename}`;
 }
 
-// Process an export job
+// Helper to generate a unique filename for partial CSV chunks
+function generatePartialChunkFilename(
+  jobId: number,
+  storeHash: string,
+  locale: string,
+  channelName: string,
+  chunkIndex: number,
+  resourceType: string = "products"
+): string {
+  const timestamp = Date.now();
+  const randomBytes = crypto.randomBytes(8).toString("hex");
+  const sanitizedChannelName = channelName.replace(/[^a-zA-Z0-9.-]/g, "_");
+  const descriptiveFilename = `${jobId}-${sanitizedChannelName}-${locale}-${resourceType}-chunk-${chunkIndex}.csv`;
+  return `exports/${storeHash}/chunks/${timestamp}-${randomBytes}-${descriptiveFilename}`;
+}
+
+// Types for chunk metadata
+interface ExportChunkMetadata {
+  chunkIndex: number;
+  totalChunks: number;
+  processedProducts: number;
+  totalProducts: number;
+  partialCsvUrls: string[];
+  isComplete: boolean;
+}
+
+interface ImportChunkMetadata {
+  processedProducts: number;
+  totalProducts: number;
+  isComplete: boolean;
+}
+
+// Helper to get chunk metadata from job
+function getExportChunkMetadata(job: TranslationJob): ExportChunkMetadata | null {
+  if (!job.metadata || typeof job.metadata !== 'object') {
+    return null;
+  }
+  const metadata = job.metadata as any;
+  if (metadata.chunkIndex !== undefined) {
+    return metadata as ExportChunkMetadata;
+  }
+  return null;
+}
+
+function getImportChunkMetadata(job: TranslationJob): ImportChunkMetadata | null {
+  if (!job.metadata || typeof job.metadata !== 'object') {
+    return null;
+  }
+  const metadata = job.metadata as any;
+  if (metadata.processedProducts !== undefined) {
+    return metadata as ImportChunkMetadata;
+  }
+  return null;
+}
+
+// Helper to combine multiple CSV files into one
+async function combineCsvFiles(
+  csvUrls: string[],
+  defaultLocale: string,
+  targetLocale: string
+): Promise<string> {
+  if (csvUrls.length === 0) {
+    throw new Error("No CSV files to combine");
+  }
+
+  const allRecords: TranslationRecord[] = [];
+
+  for (const url of csvUrls) {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch CSV chunk from ${url}: ${response.statusText}`);
+    }
+    const csvContent = await response.text();
+    const records = await parseCSV<TranslationRecord>(csvContent);
+    allRecords.push(...records);
+  }
+
+  // Generate combined CSV with same format as original
+  return stringifyCSV(allRecords, defaultLocale, targetLocale);
+}
+
+// Helper function to process a single chunk of products for export
+async function processProductChunk(
+  productAssignments: { channel_id: number; product_id: number }[],
+  job: TranslationJob,
+  graphqlClient: GraphQLClient,
+  defaultLocale: string
+): Promise<TranslationRecord[]> {
+  console.log(
+    `[Export] Starting to process chunk of ${productAssignments.length} products`
+  );
+  console.log(
+    `[Export] Processing with ${CONFIG.CONCURRENT_REQUESTS_EXPORT} concurrent requests, retry on error (max 3 attempts, 100ms delay)`
+  );
+
+  const results: TranslationRecord[] = [];
+  const errors: Error[] = [];
+  const batchSize = CONFIG.CONCURRENT_REQUESTS_EXPORT;
+  // Log progress every 100 products (or use EXPORT_BATCH_SIZE if >= 100)
+  const progressInterval = CONFIG.EXPORT_BATCH_SIZE >= 100 ? CONFIG.EXPORT_BATCH_SIZE : 100;
+  let processedCount = 0;
+
+  // Helper function to fetch product translation with retry logic
+  async function fetchProductTranslationWithRetry(
+    productId: number,
+    maxRetries: number = 3
+  ): Promise<any> {
+    let lastError: Error | null = null;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const translation = await graphqlClient.getProductLocaleData({
+          pid: productId,
+          channelId: job.channelId,
+          locale: job.locale,
+          availableLocales: [{ code: job.locale }],
+          defaultLocale: defaultLocale,
+        });
+        return translation;
+      } catch (error) {
+        lastError = error as Error;
+        if (attempt < maxRetries) {
+          console.log(
+            `[Export] Error fetching product ${productId} (attempt ${attempt}/${maxRetries}), retrying after 100ms...`
+          );
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        } else {
+          console.error(
+            `[Export] Failed to fetch product ${productId} after ${maxRetries} attempts:`,
+            lastError
+          );
+          throw lastError;
+        }
+      }
+    }
+    
+    throw lastError || new Error(`Failed to fetch product ${productId} after ${maxRetries} attempts`);
+  }
+
+  // Process items in batches with progress logging
+  for (let i = 0; i < productAssignments.length; i += batchSize) {
+    const batch = productAssignments.slice(i, i + batchSize);
+
+    // Process batch concurrently
+    const batchResults = await Promise.allSettled(
+      batch.map(async (assignment: { channel_id: number; product_id: number }) => {
+      const productId = assignment.product_id;
+
+      try {
+        const translation = await fetchProductTranslationWithRetry(productId);
+
+          const productNode = translation;
+          const localeNode = productNode.overridesForLocale;
+
+          const options = productNode?.options?.edges;
+          const modifiers = productNode?.modifiers?.edges;
+          const customFields = productNode?.customFields?.edges;
+
+          return {
+            productId: productId,
+            // Basic Information
+            [`name_${defaultLocale}`]:
+              productNode?.basicInformation?.name || "",
+            [`name_${job.locale}`]: localeNode?.basicInformation?.name || "",
+            [`description_${defaultLocale}`]:
+              productNode?.basicInformation?.description || "",
+            [`description_${job.locale}`]:
+              localeNode?.basicInformation?.description || "",
+
+            // SEO Information
+            [`pageTitle_${defaultLocale}`]:
+              productNode?.seoInformation?.pageTitle || "",
+            [`pageTitle_${job.locale}`]:
+              localeNode?.seoInformation?.pageTitle || "",
+            [`metaDescription_${defaultLocale}`]:
+              productNode?.seoInformation?.metaDescription || "",
+            [`metaDescription_${job.locale}`]:
+              localeNode?.seoInformation?.metaDescription || "",
+
+            // Storefront Details
+            [`warranty_${defaultLocale}`]:
+              productNode?.storefrontDetails?.warranty || "",
+            [`warranty_${job.locale}`]:
+              localeNode?.storefrontDetails?.warranty || "",
+            [`availabilityDescription_${defaultLocale}`]:
+              productNode?.storefrontDetails?.availabilityDescription || "",
+            [`availabilityDescription_${job.locale}`]:
+              localeNode?.storefrontDetails?.availabilityDescription || "",
+            [`searchKeywords_${defaultLocale}`]:
+              productNode?.storefrontDetails?.searchKeywords || "",
+            [`searchKeywords_${job.locale}`]:
+              localeNode?.storefrontDetails?.searchKeywords || "",
+
+            // Pre-order Settings
+            [`preOrderMessage_${defaultLocale}`]:
+              productNode?.preOrderSettings?.message || "",
+            [`preOrderMessage_${job.locale}`]:
+              localeNode?.preOrderSettings?.message || "",
+
+            // Options
+            [`options_${defaultLocale}`]: JSON.stringify(
+              formatOptionsData(productNode?.options)
+            ),
+            [`options_${job.locale}`]: JSON.stringify(
+              formatOptionsData(options)
+            ),
+
+            // Modifiers
+            [`modifiers_${defaultLocale}`]: JSON.stringify(
+              formatModifiersData(productNode?.modifiers)
+            ),
+            [`modifiers_${job.locale}`]: JSON.stringify(
+              formatModifiersData(modifiers)
+            ),
+
+            // Custom Fields
+            [`customFields_${defaultLocale}`]: JSON.stringify(
+              formatCustomFieldsData(productNode?.customFields)
+            ),
+            [`customFields_${job.locale}`]: JSON.stringify(
+              formatCustomFieldsData(customFields)
+            ),
+          };
+        } catch (error) {
+          console.error(
+            `[Export] Error fetching translation for product ${productId}:`,
+            error
+          );
+          const errorWithResponse = error as Error & { response?: any };
+          await logTranslationError({
+            jobId: job.id,
+            entityId: productId,
+            lineNumber: 0,
+            errorType: "api_error",
+            errorMessage: errorWithResponse.message,
+            rawData: JSON.stringify({
+              productId,
+              response: errorWithResponse.response,
+            }),
+          });
+          return {
+            productId: productId,
+            [`name_${defaultLocale}`]: "",
+            [`name_${job.locale}`]: "",
+            [`description_${defaultLocale}`]: "",
+            [`description_${job.locale}`]: "",
+            [`pageTitle_${defaultLocale}`]: "",
+            [`pageTitle_${job.locale}`]: "",
+            [`metaDescription_${defaultLocale}`]: "",
+            [`metaDescription_${job.locale}`]: "",
+            [`warranty_${defaultLocale}`]: "",
+            [`warranty_${job.locale}`]: "",
+            [`availabilityDescription_${defaultLocale}`]: "",
+            [`availabilityDescription_${job.locale}`]: "",
+            [`searchKeywords_${defaultLocale}`]: "",
+            [`searchKeywords_${job.locale}`]: "",
+            [`preOrderMessage_${defaultLocale}`]: "",
+            [`preOrderMessage_${job.locale}`]: "",
+            [`options_${defaultLocale}`]: "",
+            [`options_${job.locale}`]: "",
+            [`modifiers_${defaultLocale}`]: "",
+            [`modifiers_${job.locale}`]: "",
+            [`customFields_${defaultLocale}`]: "",
+            [`customFields_${job.locale}`]: "",
+          };
+        }
+      })
+    );
+
+    // Handle results and errors
+    batchResults.forEach((result, index) => {
+      if (result.status === "fulfilled") {
+        results.push(result.value);
+        processedCount++;
+      } else {
+        errors.push(result.reason);
+        processedCount++;
+      }
+    });
+
+    // Log progress every N products
+    if (processedCount % progressInterval === 0 || processedCount === productAssignments.length) {
+      const percentage = Math.round((processedCount / productAssignments.length) * 100);
+      console.log(
+        `[Export] Progress: ${processedCount}/${productAssignments.length} products processed (${percentage}%)`
+      );
+    }
+  }
+
+  if (errors.length > 0) {
+    console.warn(
+      `[Export] Completed with ${errors.length} errors out of ${productAssignments.length} products`
+    );
+  }
+
+  console.log(
+    `[Export] Completed processing chunk of ${productAssignments.length} products (${results.length} successfully processed)`
+  );
+
+  return results;
+}
+
+// Helper function to get product assignments for a specific chunk
+// Returns: { assignments, totalProducts, totalPages }
+async function getProductAssignmentsChunk(
+  channelId: number,
+  restClient: BigCommerceRestClient,
+  startIndex: number,
+  maxProducts: number,
+  knownTotal?: number
+): Promise<{
+  assignments: { channel_id: number; product_id: number }[];
+  totalProducts: number;
+  totalPages: number;
+}> {
+  const assignments: any[] = [];
+  const limit = CONFIG.PRODUCTS_PER_PAGE;
+  
+  // Calculate which pages we need to read
+  const startPage = Math.floor(startIndex / limit) + 1;
+  const endIndex = startIndex + maxProducts;
+  const endPage = Math.ceil(endIndex / limit);
+  
+  let totalProducts: number | undefined = knownTotal;
+  let totalPages: number | undefined;
+
+  console.log(
+    `[Export] Fetching product assignments for chunk: pages ${startPage}${totalPages ? `-${Math.min(endPage, totalPages)}` : `-${endPage}`} (products ${startIndex + 1} to ${endIndex})`
+  );
+
+  for (let page = startPage; page <= endPage; page++) {
+    const pageInfo = totalPages !== undefined ? ` of ${totalPages}` : '';
+    console.log(`[Export] Reading page ${page}${pageInfo} (${limit} products per page)`);
+    
+    const productAssignmentsPage = await restClient.getChannelProductAssignments(
+      channelId,
+      limit,
+      page
+    ) as {data: any[]; meta?: {pagination?: any}};
+    
+    const pageAssignments = productAssignmentsPage.data || [];
+    
+    // Get pagination info from first page
+    if (page === startPage) {
+      const pagination = productAssignmentsPage.meta?.pagination;
+      if (pagination) {
+        totalPages = pagination.total_pages || 1;
+        totalProducts = pagination.total || pageAssignments.length;
+      }
+    }
+    
+    // Calculate which products from this page we need
+    const pageStartIndex = (page - 1) * limit;
+    const pageEndIndex = pageStartIndex + pageAssignments.length;
+    
+    // Only add assignments that are in our chunk range
+    const chunkStartInPage = Math.max(0, startIndex - pageStartIndex);
+    const chunkEndInPage = Math.min(pageAssignments.length, endIndex - pageStartIndex);
+    
+    if (chunkStartInPage < chunkEndInPage) {
+      const neededAssignments = pageAssignments.slice(chunkStartInPage, chunkEndInPage);
+      assignments.push(...neededAssignments);
+      console.log(
+        `[Export] Page ${page} returned ${pageAssignments.length} product assignments, using ${neededAssignments.length} for chunk (chunk total so far: ${assignments.length})`
+      );
+    } else {
+      console.log(`[Export] Page ${page} returned ${pageAssignments.length} product assignments, none needed for this chunk`);
+    }
+    
+    // Stop if we have enough or if we've read all pages
+    if (assignments.length >= maxProducts) {
+      break;
+    }
+    
+    if (totalPages !== undefined && page >= totalPages) {
+      break;
+    }
+    
+    // Delay between pages
+    if (page < endPage && (totalPages === undefined || page < totalPages)) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, CONFIG.MIN_DELAY_BETWEEN_PAGES)
+      );
+    }
+  }
+
+  // If we don't have totalProducts yet, estimate it
+  if (totalProducts === undefined) {
+    if (totalPages !== undefined) {
+      // We can estimate based on pages read
+      totalProducts = assignments.length; // Conservative estimate
+    } else {
+      totalProducts = assignments.length;
+    }
+  }
+
+  console.log(
+    `[Export] Completed reading chunk pages. Got ${assignments.length} product assignments${totalProducts !== undefined ? ` (total products: ${totalProducts})` : ''}`
+  );
+
+  return {
+    assignments: assignments.slice(0, maxProducts), // Ensure we don't exceed maxProducts
+    totalProducts: totalProducts || assignments.length,
+    totalPages: totalPages || Math.ceil(assignments.length / limit),
+  };
+}
+
+// Process an export job with chunking support
 async function processExportJob(
   job: TranslationJob,
   graphqlClient: GraphQLClient,
@@ -1009,17 +1563,11 @@ async function processExportJob(
 
   try {
     // Get channel details first
-    console.log(
-      `[Export] Fetching channel details for channel ${job.channelId}`
-    );
     const channelResponse = await restClient.getChannel(job.channelId);
     const channelName =
       channelResponse.data?.name || `channel-${job.channelId}`;
 
     // Get channel locales to determine default locale
-    console.log(
-      `[Export] Fetching channel locales for channel ${job.channelId}`
-    );
     const { data: localesData } = await restClient.getChannelLocales(
       job.channelId
     );
@@ -1028,262 +1576,186 @@ async function processExportJob(
       fallbackLocale.code;
     console.log(`[Export] Using default locale: ${defaultLocale}`);
 
-    // Get products from channel with pagination
-    console.log(`[Export] Fetching products for channel ${job.channelId}`);
+    // Check if this is a chunked export in progress
+    const chunkMetadata = getExportChunkMetadata(job);
     
-    const allProductAssignments: any[] = [];
-    let page = 1;
-    const limit = CONFIG.PRODUCTS_PER_PAGE; // Use configurable page size from .env
-    
-    console.log(
-      `[Export] Using page size: ${limit} (from TRANSLATION_PRODUCTS_PER_PAGE env var)`
-    );
-    
-    while (true) {
-      const productAssignmentsPage = await restClient.getChannelProductAssignments(
-        job.channelId,
-        limit,
-        page
-      ) as {data: any[]; meta?: {pagination?: any}};
-      
-      const assignments = productAssignmentsPage.data || [];
+    let chunkAssignments: { channel_id: number; product_id: number }[];
+    let currentChunkIndex: number;
+    let totalChunks: number;
+    let totalProducts: number;
+    let partialCsvUrls: string[];
+
+    if (chunkMetadata && !chunkMetadata.isComplete) {
+      // Continue from existing chunk
       console.log(
-        `[Export] Page ${page} returned ${assignments.length} product assignments`
+        `[Export] Resuming chunked export: chunk ${chunkMetadata.chunkIndex + 1} of ${chunkMetadata.totalChunks}`
       );
       
-      allProductAssignments.push(...assignments);
+      currentChunkIndex = chunkMetadata.chunkIndex + 1;
+      totalChunks = chunkMetadata.totalChunks;
+      totalProducts = chunkMetadata.totalProducts;
+      partialCsvUrls = [...chunkMetadata.partialCsvUrls];
       
-      // Check if there are more pages
-      const pagination = productAssignmentsPage.meta?.pagination;
-      if (pagination) {
-        const totalPages = pagination.total_pages || 1;
-        const currentPage = pagination.current_page || page;
-        
-        console.log(
-          `[Export] Pagination info: page ${currentPage} of ${totalPages}, total items: ${pagination.total || 'unknown'}`
-        );
-        
-        if (currentPage < totalPages && assignments.length > 0) {
-          page += 1;
-          console.log(
-            `[Export] Waiting ${CONFIG.MIN_DELAY_BETWEEN_PAGES}ms before fetching next page`
-          );
-          await new Promise((resolve) =>
-            setTimeout(resolve, CONFIG.MIN_DELAY_BETWEEN_PAGES)
-          );
-        } else {
-          console.log(`[Export] Reached last page (${currentPage} of ${totalPages})`);
-          break;
-        }
-      } else {
-        // If no pagination metadata, use heuristics:
-        // - If we got less than the limit, we're done
-        // - If we got exactly the limit, try one more page to check
-        if (assignments.length < limit) {
-          console.log(
-            `[Export] No pagination metadata, but got ${assignments.length} items (less than limit ${limit}), assuming last page`
-          );
-          break;
-        }
-        // If we got exactly the limit, there might be more pages
-        if (assignments.length === limit) {
-          page += 1;
-          console.log(
-            `[Export] No pagination metadata, checking page ${page} (got ${limit} items on previous page)`
-          );
-          await new Promise((resolve) =>
-            setTimeout(resolve, CONFIG.MIN_DELAY_BETWEEN_PAGES)
-          );
-        } else {
-          break;
-        }
+      // Read only the pages needed for this chunk
+      const chunkStart = currentChunkIndex * CONFIG.MAX_PRODUCTS_PER_EXPORT_CHUNK;
+      const chunkResult = await getProductAssignmentsChunk(
+        job.channelId,
+        restClient,
+        chunkStart,
+        CONFIG.MAX_PRODUCTS_PER_EXPORT_CHUNK,
+        totalProducts
+      );
+      chunkAssignments = chunkResult.assignments;
+    } else {
+      // Start new chunked export - read only first chunk + get total
+      console.log(`[Export] Starting new chunked export`);
+      
+      currentChunkIndex = 0;
+      const chunkStart = 0;
+      const chunkResult = await getProductAssignmentsChunk(
+        job.channelId,
+        restClient,
+        chunkStart,
+        CONFIG.MAX_PRODUCTS_PER_EXPORT_CHUNK
+      );
+      
+      chunkAssignments = chunkResult.assignments;
+      totalProducts = chunkResult.totalProducts;
+      totalChunks = Math.ceil(totalProducts / CONFIG.MAX_PRODUCTS_PER_EXPORT_CHUNK);
+      partialCsvUrls = [];
+
+      if (!chunkAssignments.length) {
+        throw new Error("No products found for export");
       }
+
+      console.log(
+        `[Export] Found ${totalProducts} total products (read ${chunkAssignments.length} for first chunk), will process in ${totalChunks} chunks of max ${CONFIG.MAX_PRODUCTS_PER_EXPORT_CHUNK} products each`
+      );
     }
 
-    console.log(
-      `[Export] Found ${allProductAssignments.length} total product assignments`
-    );
-
-    if (!allProductAssignments.length) {
-      throw new Error("No products found for export");
-    }
-
-    // Get translations for each product
-    console.log(
-      `[Export] Fetching translations for ${allProductAssignments.length} products in locale ${job.locale}`
-    );
-
-    const translatedProducts = await Promise.all(
-      allProductAssignments.map(
-        async (assignment: { channel_id: number; product_id: number }) => {
-          const productId = assignment.product_id;
-
-          try {
-            const translation = await graphqlClient.getProductLocaleData({
-              pid: productId,
-              channelId: job.channelId,
-              locale: job.locale,
-              availableLocales: [{ code: job.locale }],
-              defaultLocale: defaultLocale,
-            });
-
-            console.log(`[Export] Got translation for product ${productId}`);
-
-            const productNode = translation;
-            const localeNode = productNode.overridesForLocale;
-
-            // TODO: make a shared function for this that products GET route also can use
-            const options = productNode?.options?.edges;
-            const modifiers = productNode?.modifiers?.edges;
-            const customFields = productNode?.customFields?.edges;
-
-            return {
-              productId: productId,
-              // Basic Information
-              [`name_${defaultLocale}`]:
-                productNode?.basicInformation?.name || "",
-              [`name_${job.locale}`]: localeNode?.basicInformation?.name || "",
-              [`description_${defaultLocale}`]:
-                productNode?.basicInformation?.description || "",
-              [`description_${job.locale}`]:
-                localeNode?.basicInformation?.description || "",
-
-              // SEO Information
-              [`pageTitle_${defaultLocale}`]:
-                productNode?.seoInformation?.pageTitle || "",
-              [`pageTitle_${job.locale}`]:
-                localeNode?.seoInformation?.pageTitle || "",
-              [`metaDescription_${defaultLocale}`]:
-                productNode?.seoInformation?.metaDescription || "",
-              [`metaDescription_${job.locale}`]:
-                localeNode?.seoInformation?.metaDescription || "",
-
-              // Storefront Details
-              [`warranty_${defaultLocale}`]:
-                productNode?.storefrontDetails?.warranty || "",
-              [`warranty_${job.locale}`]:
-                localeNode?.storefrontDetails?.warranty || "",
-              [`availabilityDescription_${defaultLocale}`]:
-                productNode?.storefrontDetails?.availabilityDescription || "",
-              [`availabilityDescription_${job.locale}`]:
-                localeNode?.storefrontDetails?.availabilityDescription || "",
-              [`searchKeywords_${defaultLocale}`]:
-                productNode?.storefrontDetails?.searchKeywords || "",
-              [`searchKeywords_${job.locale}`]:
-                localeNode?.storefrontDetails?.searchKeywords || "",
-
-              // Pre-order Settings
-              [`preOrderMessage_${defaultLocale}`]:
-                productNode?.preOrderSettings?.message || "",
-              [`preOrderMessage_${job.locale}`]:
-                localeNode?.preOrderSettings?.message || "",
-
-              // Options
-              [`options_${defaultLocale}`]: JSON.stringify(
-                formatOptionsData(productNode?.options)
-              ),
-              [`options_${job.locale}`]: JSON.stringify(
-                formatOptionsData(options)
-              ),
-
-              // Modifiers
-              [`modifiers_${defaultLocale}`]: JSON.stringify(
-                formatModifiersData(productNode?.modifiers)
-              ),
-              [`modifiers_${job.locale}`]: JSON.stringify(
-                formatModifiersData(modifiers)
-              ),
-
-              // Custom Fields
-              [`customFields_${defaultLocale}`]: JSON.stringify(
-                formatCustomFieldsData(productNode?.customFields)
-              ),
-              [`customFields_${job.locale}`]: JSON.stringify(
-                formatCustomFieldsData(customFields)
-              ),
-            };
-          } catch (error) {
-            console.error(
-              `[Export] Error fetching translation for product ${productId}:`,
-              error
-            );
-            // Log the error to the database, including the GraphQL response
-            const errorWithResponse = error as Error & { response?: any };
-            await logTranslationError({
-              jobId: job.id,
-              entityId: productId,
-              lineNumber: 0, // Assuming line number is not applicable here
-              errorType: "api_error",
-              errorMessage: errorWithResponse.message,
-              rawData: JSON.stringify({
-                productId,
-                response: errorWithResponse.response,
-              }),
-            });
-            return {
-              productId: productId,
-              [`name_${defaultLocale}`]: "",
-              [`name_${job.locale}`]: "",
-              [`description_${defaultLocale}`]: "",
-              [`description_${job.locale}`]: "",
-              [`pageTitle_${defaultLocale}`]: "",
-              [`pageTitle_${job.locale}`]: "",
-              [`metaDescription_${defaultLocale}`]: "",
-              [`metaDescription_${job.locale}`]: "",
-              [`warranty_${defaultLocale}`]: "",
-              [`warranty_${job.locale}`]: "",
-              [`availabilityDescription_${defaultLocale}`]: "",
-              [`availabilityDescription_${job.locale}`]: "",
-              [`searchKeywords_${defaultLocale}`]: "",
-              [`searchKeywords_${job.locale}`]: "",
-              [`preOrderMessage_${defaultLocale}`]: "",
-              [`preOrderMessage_${job.locale}`]: "",
-              [`options_${defaultLocale}`]: "",
-              [`options_${job.locale}`]: "",
-              [`modifiers_${defaultLocale}`]: "",
-              [`modifiers_${job.locale}`]: "",
-              [`customFields_${defaultLocale}`]: "",
-              [`customFields_${job.locale}`]: "",
-            };
-          }
-        }
-      )
+    // Process current chunk ONLY - one chunk per cron execution
+    // This ensures we don't exceed Vercel timeout limits
+    const chunkStart = currentChunkIndex * CONFIG.MAX_PRODUCTS_PER_EXPORT_CHUNK;
+    const chunkEnd = Math.min(
+      chunkStart + CONFIG.MAX_PRODUCTS_PER_EXPORT_CHUNK,
+      totalProducts
     );
 
     console.log(
-      `[Export] Creating CSV for ${translatedProducts.length} products`
+      `[Export] Processing chunk ${currentChunkIndex + 1}/${totalChunks} (products ${chunkStart + 1}-${chunkEnd} of ${totalProducts}) - ONE CHUNK PER CRON EXECUTION`
     );
-    // Create CSV content
+
+    const translatedProducts = await processProductChunk(
+      chunkAssignments,
+      job,
+      graphqlClient,
+      defaultLocale
+    );
+
+    // Generate CSV for this chunk
     const csvContent = stringifyCSV(
       translatedProducts,
       defaultLocale,
       job.locale
     );
 
-    // Upload to blob storage with unique filename including channel name
-    console.log("[Export] Uploading CSV to blob storage");
-    const uniqueFilename = generateUniqueExportFilename(
+    // Upload chunk CSV
+    const chunkFilename = generatePartialChunkFilename(
       job.id,
       job.storeHash,
       job.locale,
-      channelName
+      channelName,
+      currentChunkIndex
     );
-    const { url } = await put(uniqueFilename, csvContent, {
+    const { url: chunkUrl } = await put(chunkFilename, csvContent, {
       access: "public",
       contentType: "text/csv",
-      addRandomSuffix: false, // We handle uniqueness ourselves
+      addRandomSuffix: false,
     });
 
-    console.log(`[Export] Upload complete. File URL: ${url}`);
-    return url;
+    partialCsvUrls.push(chunkUrl);
+    console.log(`[Export] Chunk ${currentChunkIndex + 1} uploaded: ${chunkUrl}`);
+
+    const isLastChunk = currentChunkIndex + 1 >= totalChunks;
+
+    if (isLastChunk) {
+      // Combine all chunks into final CSV
+      console.log(`[Export] Last chunk completed, combining ${partialCsvUrls.length} chunks into final CSV`);
+      
+      const finalCsvContent = await combineCsvFiles(
+        partialCsvUrls,
+        defaultLocale,
+        job.locale
+      );
+
+      // Upload final CSV
+      const finalFilename = generateUniqueExportFilename(
+        job.id,
+        job.storeHash,
+        job.locale,
+        channelName
+      );
+      const { url: finalUrl } = await put(finalFilename, finalCsvContent, {
+        access: "public",
+        contentType: "text/csv",
+        addRandomSuffix: false,
+      });
+
+      console.log(`[Export] Final CSV uploaded: ${finalUrl}`);
+
+      // Delete partial chunk files
+      console.log(`[Export] Deleting ${partialCsvUrls.length} partial chunk files`);
+      for (const chunkUrl of partialCsvUrls) {
+        try {
+          await del(chunkUrl);
+        } catch (error) {
+          console.warn(`[Export] Failed to delete chunk file ${chunkUrl}:`, error);
+          // Continue even if deletion fails
+        }
+      }
+
+      // Update job metadata to mark as complete
+      await db.updateTranslationJob(job.id, {
+        metadata: {
+          chunkIndex: currentChunkIndex,
+          totalChunks,
+          processedProducts: totalProducts,
+          totalProducts: totalProducts,
+          partialCsvUrls: [],
+          isComplete: true,
+        } as ExportChunkMetadata,
+      });
+
+      return finalUrl;
+    } else {
+      // Update job metadata for next chunk
+      await db.updateTranslationJob(job.id, {
+        status: "pending", // Keep as pending so next cron picks it up
+        metadata: {
+          chunkIndex: currentChunkIndex,
+          totalChunks,
+          processedProducts: chunkEnd,
+          totalProducts: totalProducts,
+          partialCsvUrls,
+          isComplete: false,
+        } as ExportChunkMetadata,
+      });
+
+      console.log(
+        `[Export] Chunk ${currentChunkIndex + 1} completed. Job will be picked up by next cron for chunk ${currentChunkIndex + 2}`
+      );
+
+      // Return null to indicate job is not yet complete
+      // IMPORTANT: Only ONE chunk is processed per cron execution to avoid timeout
+      return null;
+    }
   } catch (error) {
     console.error("[Export] Job failed:", error);
-    // Log the error to the database, including the GraphQL response
     const errorWithResponse = error as Error & { response?: any };
     await logTranslationError({
       jobId: job.id,
-      entityId: 0, // Assuming no specific entity ID is applicable here
-      lineNumber: 0, // Assuming line number is not applicable here
+      entityId: 0,
+      lineNumber: 0,
       errorType: "export_error",
       errorMessage: errorWithResponse.message,
       rawData: JSON.stringify({
@@ -2339,7 +2811,8 @@ export async function GET(request: NextRequest) {
         ? await db.getPendingTranslationJobsByStore(auth.storeHash)
         : await db.getPendingTranslationJobs();
 
-    // Process each job
+    // Process each job - IMPORTANT: Each job processes ONLY ONE chunk per cron execution
+    // This ensures we don't exceed Vercel timeout limits
     for (const job of pendingJobs) {
       try {
         // Get store token
@@ -2369,6 +2842,19 @@ export async function GET(request: NextRequest) {
             await processSharedOptionsImportJob(job, graphqlClient);
           } else {
             await processImportJob(job, graphqlClient);
+            // Check if import job is complete (processImportJob updates metadata)
+            const updatedJob = await db.getTranslationJobs(job.storeHash);
+            const currentJob = updatedJob.find((j) => j.id === job.id);
+            if (currentJob) {
+              const importMetadata = getImportChunkMetadata(currentJob);
+              if (importMetadata && importMetadata.isComplete) {
+                await db.updateTranslationJob(job.id, {
+                  status: "completed",
+                });
+              }
+              // If not complete, status is already set to "pending" by processImportJob
+              continue; // Skip the "completed" update below
+            }
           }
         } else {
           let fileUrl;
@@ -2392,11 +2878,20 @@ export async function GET(request: NextRequest) {
             );
           } else {
             fileUrl = await processExportJob(job, graphqlClient, restClient);
+            // Only update to completed if fileUrl is not null (job is complete)
+            if (fileUrl !== null) {
+              await db.updateTranslationJob(job.id, {
+                status: "completed",
+                fileUrl: fileUrl,
+              });
+            }
+            // If fileUrl is null, the job is not complete and status is already set to "pending" by processExportJob
+            continue; // Skip the "completed" update below
           }
           job.fileUrl = fileUrl;
         }
 
-        // Update job status to completed
+        // Update job status to completed (only for non-chunked jobs)
         await db.updateTranslationJob(job.id, {
           status: "completed",
           fileUrl: job.fileUrl,
