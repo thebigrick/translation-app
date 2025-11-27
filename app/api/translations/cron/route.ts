@@ -415,8 +415,8 @@ const CONFIG = {
   SHARED_OPTIONS_PER_PAGE: Number(process.env.TRANSLATION_SHARED_OPTIONS_PER_PAGE) || 50,
 
   // Batch processing settings (for progress logging)
-  IMPORT_BATCH_SIZE: Number(process.env.TRANSLATION_IMPORT_BATCH_SIZE) || 3,
-  EXPORT_BATCH_SIZE: Number(process.env.TRANSLATION_EXPORT_BATCH_SIZE) || 3,
+  IMPORT_BATCH_SIZE: Number(process.env.TRANSLATION_IMPORT_BATCH_SIZE) || 10,
+  EXPORT_BATCH_SIZE: Number(process.env.TRANSLATION_EXPORT_BATCH_SIZE) || 100,
 
   // Delay settings (in milliseconds) - used for pagination in export jobs
   MIN_DELAY_BETWEEN_PAGES: Number(process.env.TRANSLATION_PAGE_DELAY_MS) || 200,
