@@ -45,11 +45,19 @@ import {
   formatSharedOptionForCSV,
 } from "@/lib/utils/shared-option-helpers";
 
+// ============================================================================
+// TYPES & INTERFACES
+// ============================================================================
+
 // CSV record type
 interface TranslationRecord {
   productId: number;
   [key: string]: string | number; // Allow dynamic locale-based column names
 }
+
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
 
 // Helper function to get locale-specific field for products
 function getLocaleField(
@@ -390,28 +398,27 @@ function stringifyCSV(
   }
 }
 
+// ============================================================================
+// CONFIGURATION
+// ============================================================================
+
 // Configuration from environment variables with defaults
 const CONFIG = {
-  // Rate limiting settings
-  // Separate concurrent requests for export and import
+  // Concurrent requests settings (separate for export and import)
   CONCURRENT_REQUESTS_EXPORT: Number(process.env.TRANSLATION_CONCURRENT_REQUESTS_EXPORT) || Number(process.env.TRANSLATION_CONCURRENT_REQUESTS) || 10,
   CONCURRENT_REQUESTS_IMPORT: Number(process.env.TRANSLATION_CONCURRENT_REQUESTS_IMPORT) || Number(process.env.TRANSLATION_CONCURRENT_REQUESTS) || 10,
-  REQUESTS_PER_SECOND: Number(process.env.TRANSLATION_REQUESTS_PER_SECOND) || 30,
 
   // Pagination settings
   PRODUCTS_PER_PAGE: Number(process.env.TRANSLATION_PRODUCTS_PER_PAGE) || 50,
-  CATEGORIES_PER_PAGE:
-    Number(process.env.TRANSLATION_CATEGORIES_PER_PAGE) || 50,
-  SHARED_MODIFIERS_PER_PAGE:
-    Number(process.env.TRANSLATION_SHARED_MODIFIERS_PER_PAGE) || 50,
-  SHARED_OPTIONS_PER_PAGE:
-    Number(process.env.TRANSLATION_SHARED_OPTIONS_PER_PAGE) || 50,
+  CATEGORIES_PER_PAGE: Number(process.env.TRANSLATION_CATEGORIES_PER_PAGE) || 50,
+  SHARED_MODIFIERS_PER_PAGE: Number(process.env.TRANSLATION_SHARED_MODIFIERS_PER_PAGE) || 50,
+  SHARED_OPTIONS_PER_PAGE: Number(process.env.TRANSLATION_SHARED_OPTIONS_PER_PAGE) || 50,
 
-  // Batch processing settings
+  // Batch processing settings (for progress logging)
   IMPORT_BATCH_SIZE: Number(process.env.TRANSLATION_IMPORT_BATCH_SIZE) || 3,
   EXPORT_BATCH_SIZE: Number(process.env.TRANSLATION_EXPORT_BATCH_SIZE) || 3,
 
-  // Delay settings (in milliseconds)
+  // Delay settings (in milliseconds) - used for pagination in export jobs
   MIN_DELAY_BETWEEN_PAGES: Number(process.env.TRANSLATION_PAGE_DELAY_MS) || 200,
 
   // Chunk processing settings
@@ -428,54 +435,23 @@ Object.entries(CONFIG).forEach(([key, value]) => {
   }
 });
 
-// Helper function to process items in batches with rate limiting
-async function processBatch<T, R>(
-  items: T[],
-  processItem: (item: T) => Promise<R>,
-  { batchSize = CONFIG.CONCURRENT_REQUESTS_IMPORT } = {}
-): Promise<R[]> {
-  const results: R[] = [];
-  const errors: Error[] = [];
+// ============================================================================
+// CSV HELPERS
+// ============================================================================
 
-  // Process items in batches
-  for (let i = 0; i < items.length; i += batchSize) {
-    const batch = items.slice(i, i + batchSize);
-    const batchStartTime = Date.now();
-
-    // Process batch concurrently
-    const batchResults = await Promise.allSettled(
-      batch.map((item) => processItem(item))
-    );
-
-    // Handle results and errors
-    batchResults.forEach((result, index) => {
-      if (result.status === "fulfilled") {
-        results.push(result.value);
-      } else {
-        errors.push(result.reason);
-        console.error(`Error processing item ${i + index}:`, result.reason);
-      }
-    });
-
-    // Rate limiting delay
-    const batchDuration = Date.now() - batchStartTime;
-    const minBatchTime = (batch.length / CONFIG.REQUESTS_PER_SECOND) * 1000;
-    if (batchDuration < minBatchTime) {
-      await new Promise((resolve) =>
-        setTimeout(resolve, minBatchTime - batchDuration)
-      );
-    }
+// Helper function to fetch and parse CSV file
+async function fetchAndParseCSV<T>(fileUrl: string): Promise<T[]> {
+  const response = await fetch(fileUrl);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch CSV file: ${response.statusText}`);
   }
-
-  if (errors.length > 0) {
-    throw new AggregateError(
-      errors,
-      `${errors.length} items failed to process`
-    );
-  }
-
-  return results;
+  const csvContent = await response.text();
+  return parseCSV<T>(csvContent);
 }
+
+// ============================================================================
+// AUTHENTICATION
+// ============================================================================
 
 async function verifyAuthorization(request: NextRequest) {
   // Check for Authorization header (secret)
@@ -502,6 +478,10 @@ async function verifyAuthorization(request: NextRequest) {
     "Unauthorized: Valid authorization header or context required"
   );
 }
+
+// ============================================================================
+// PRODUCT IMPORT HELPERS
+// ============================================================================
 
 // Interface for the mutation variables
 interface ProductLocaleUpdateVariables {
@@ -857,6 +837,10 @@ async function updateProductLocaleDataWithRetry(
   throw lastError || new Error(`Failed to update product ${productId} after ${maxRetries} attempts`);
 }
 
+// ============================================================================
+// JOB PROCESSORS
+// ============================================================================
+
 // Process an import job with chunking support
 async function processImportJob(
   job: TranslationJob,
@@ -896,35 +880,20 @@ async function processImportJob(
     let allRecords: TranslationRecord[];
     let processedProducts: number;
 
+    // Fetch and parse CSV file
     if (chunkMetadata && !chunkMetadata.isComplete) {
       // Continue from existing chunk
       console.log(
         `[Import] Resuming chunked import: processed ${chunkMetadata.processedProducts} of ${chunkMetadata.totalProducts} products`
       );
-      
-      // Fetch CSV file again (we need all records to get the chunk)
-      const response = await fetch(job.fileUrl);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch CSV file: ${response.statusText}`);
-      }
-      const csvContent = await response.text();
-      allRecords = await parseCSV<TranslationRecord>(csvContent);
+      allRecords = await fetchAndParseCSV<TranslationRecord>(job.fileUrl!);
       processedProducts = chunkMetadata.processedProducts;
     } else {
       // Start new chunked import
       console.log(`[Import] Starting new chunked import`);
-      
-      // Fetch CSV file
-      const response = await fetch(job.fileUrl);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch CSV file: ${response.statusText}`);
-      }
-
-      const csvContent = await response.text();
       console.log("[Import] Parsing CSV content");
-      allRecords = await parseCSV<TranslationRecord>(csvContent);
+      allRecords = await fetchAndParseCSV<TranslationRecord>(job.fileUrl!);
       console.log(`[Import] Found ${allRecords.length} records to import`);
-      
       processedProducts = 0;
     }
 
@@ -936,6 +905,10 @@ async function processImportJob(
       allRecords.length
     );
     const chunkRecords = allRecords.slice(chunkStart, chunkEnd);
+    
+    // Calculate chunk index and total chunks for progress display (same model as export)
+    const totalChunks = Math.ceil(allRecords.length / CONFIG.MAX_PRODUCTS_PER_IMPORT_CHUNK);
+    const currentChunkIndex = Math.floor(processedProducts / CONFIG.MAX_PRODUCTS_PER_IMPORT_CHUNK);
 
     console.log(
       `[Import] Starting to process chunk: products ${chunkStart + 1}-${chunkEnd} of ${allRecords.length} - ONE CHUNK PER CRON EXECUTION`
@@ -1022,16 +995,20 @@ async function processImportJob(
       // Update job metadata to mark as complete
       await db.updateTranslationJob(job.id, {
         metadata: {
+          chunkIndex: totalChunks - 1, // Last chunk index (0-based)
+          totalChunks,
           processedProducts: newProcessedProducts,
           totalProducts: allRecords.length,
           isComplete: true,
         } as ImportChunkMetadata,
       });
     } else {
-      // Update job metadata for next chunk
+      // Update job metadata for next chunk - use same model as export
       await db.updateTranslationJob(job.id, {
         status: "pending", // Keep as pending so next cron picks it up
         metadata: {
+          chunkIndex: currentChunkIndex, // Current chunk index (0-based)
+          totalChunks,
           processedProducts: newProcessedProducts,
           totalProducts: allRecords.length,
           isComplete: false,
@@ -1047,6 +1024,10 @@ async function processImportJob(
     throw error;
   }
 }
+
+// ============================================================================
+// PRODUCT EXPORT HELPERS
+// ============================================================================
 
 // Helper function to format options data for export
 function formatOptionsData(options: any) {
@@ -1160,6 +1141,10 @@ function generatePartialChunkFilename(
   return `exports/${storeHash}/chunks/${timestamp}-${randomBytes}-${descriptiveFilename}`;
 }
 
+// ============================================================================
+// CHUNKING HELPERS
+// ============================================================================
+
 // Types for chunk metadata
 interface ExportChunkMetadata {
   chunkIndex: number;
@@ -1171,6 +1156,8 @@ interface ExportChunkMetadata {
 }
 
 interface ImportChunkMetadata {
+  chunkIndex?: number; // Chunk index (0-based) for consistency with export
+  totalChunks?: number; // Total number of chunks for consistency with export
   processedProducts: number;
   totalProducts: number;
   isComplete: boolean;
@@ -1212,12 +1199,7 @@ async function combineCsvFiles(
   const allRecords: TranslationRecord[] = [];
 
   for (const url of csvUrls) {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch CSV chunk from ${url}: ${response.statusText}`);
-    }
-    const csvContent = await response.text();
-    const records = await parseCSV<TranslationRecord>(csvContent);
+    const records = await fetchAndParseCSV<TranslationRecord>(url);
     allRecords.push(...records);
   }
 
@@ -1803,16 +1785,10 @@ async function processCategoryImportJob(
       fallbackLocale.code;
     console.log(`[Category Import] Using default locale: ${defaultLocale}`);
 
-    // Fetch CSV file
+    // Fetch and parse CSV file
     console.log(`[Category Import] Fetching CSV from ${job.fileUrl}`);
-    const response = await fetch(job.fileUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch CSV file: ${response.statusText}`);
-    }
-
-    const csvContent = await response.text();
     console.log("[Category Import] Parsing CSV content");
-    const records = await parseCSV<CategoryTranslationRecord>(csvContent);
+    const records = await fetchAndParseCSV<CategoryTranslationRecord>(job.fileUrl!);
     console.log(`[Category Import] Found ${records.length} records to import`);
 
     // Group records in batches for efficiency
@@ -2050,20 +2026,14 @@ async function processSharedModifiersImportJob(
       throw new Error("No file URL provided for import job");
     }
 
-    // Fetch CSV file
+    // Fetch and parse CSV file
     console.log(`[Shared Modifiers Import] Fetching CSV from ${job.fileUrl}`);
-    const response = await fetch(job.fileUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch CSV file: ${response.statusText}`);
-    }
-
-    const csvContent = await response.text();
     console.log("[Shared Modifiers Import] Parsing CSV content");
+    const records = await fetchAndParseCSV<SharedModifierTranslationRecord>(job.fileUrl!);
     console.log(
       "[Shared Modifiers Import] CSV preview:",
-      csvContent.substring(0, 500)
+      JSON.stringify(records.slice(0, 3), null, 2)
     );
-    const records = await parseCSV<SharedModifierTranslationRecord>(csvContent);
     console.log(
       `[Shared Modifiers Import] Found ${records.length} records to import`
     );
@@ -2425,20 +2395,14 @@ async function processSharedOptionsImportJob(
       throw new Error("No file URL provided for import job");
     }
 
-    // Fetch CSV file
+    // Fetch and parse CSV file
     console.log(`[Shared Options Import] Fetching CSV from ${job.fileUrl}`);
-    const response = await fetch(job.fileUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch CSV file: ${response.statusText}`);
-    }
-
-    const csvContent = await response.text();
     console.log("[Shared Options Import] Parsing CSV content");
+    const records = await fetchAndParseCSV<SharedOptionTranslationRecord>(job.fileUrl!);
     console.log(
       "[Shared Options Import] CSV preview:",
-      csvContent.substring(0, 500)
+      JSON.stringify(records.slice(0, 3), null, 2)
     );
-    const records = await parseCSV<SharedOptionTranslationRecord>(csvContent);
     console.log(
       `[Shared Options Import] Found ${records.length} records to import`
     );
@@ -2799,6 +2763,92 @@ async function processSharedOptionsExportJob(
   }
 }
 
+// ============================================================================
+// JOB ROUTING HELPERS
+// ============================================================================
+
+// Helper function to process import job by resource type
+async function processImportJobByType(
+  job: TranslationJob,
+  graphqlClient: GraphQLClient
+): Promise<void> {
+  if (job.resourceType === "categories") {
+    await processCategoryImportJob(job, graphqlClient);
+    await db.updateTranslationJob(job.id, { status: "completed" });
+  } else if (job.resourceType === "shared-modifiers") {
+    await processSharedModifiersImportJob(job, graphqlClient);
+    await db.updateTranslationJob(job.id, { status: "completed" });
+  } else if (job.resourceType === "shared-options") {
+    await processSharedOptionsImportJob(job, graphqlClient);
+    await db.updateTranslationJob(job.id, { status: "completed" });
+  } else {
+    // Products import with chunking support
+    await processImportJob(job, graphqlClient);
+    // Check if import job is complete (processImportJob updates metadata)
+    const updatedJob = await db.getTranslationJobs(job.storeHash);
+    const currentJob = updatedJob.find((j) => j.id === job.id);
+    if (currentJob) {
+      const importMetadata = getImportChunkMetadata(currentJob);
+      if (importMetadata?.isComplete) {
+        await db.updateTranslationJob(job.id, { status: "completed" });
+      }
+      // If not complete, status is already set to "pending" by processImportJob
+    }
+  }
+}
+
+// Helper function to process export job by resource type
+async function processExportJobByType(
+  job: TranslationJob,
+  graphqlClient: GraphQLClient,
+  restClient: BigCommerceRestClient
+): Promise<void> {
+  let fileUrl: string | null = null;
+
+  if (job.resourceType === "categories") {
+    fileUrl = await processCategoryExportJob(job, graphqlClient, restClient);
+    await db.updateTranslationJob(job.id, {
+      status: "completed",
+      fileUrl: fileUrl,
+    });
+  } else if (job.resourceType === "shared-modifiers") {
+    fileUrl = await processSharedModifiersExportJob(
+      job,
+      graphqlClient,
+      restClient
+    );
+    await db.updateTranslationJob(job.id, {
+      status: "completed",
+      fileUrl: fileUrl,
+    });
+  } else if (job.resourceType === "shared-options") {
+    fileUrl = await processSharedOptionsExportJob(
+      job,
+      graphqlClient,
+      restClient
+    );
+    await db.updateTranslationJob(job.id, {
+      status: "completed",
+      fileUrl: fileUrl,
+    });
+  } else {
+    // Products export with chunking support
+    fileUrl = await processExportJob(job, graphqlClient, restClient);
+    // Only update to completed if fileUrl is not null (job is complete)
+    if (fileUrl !== null) {
+      await db.updateTranslationJob(job.id, {
+        status: "completed",
+        fileUrl: fileUrl,
+      });
+    }
+    // If fileUrl is null, the job is not complete and status is already set to "pending" by processExportJob
+  }
+}
+
+// ============================================================================
+// API HANDLERS
+// ============================================================================
+
 // Remove POST handler and keep only GET handler
 export async function GET(request: NextRequest) {
   try {
@@ -2834,68 +2884,10 @@ export async function GET(request: NextRequest) {
 
         // Process based on job type and resource type
         if (job.jobType === "import") {
-          if (job.resourceType === "categories") {
-            await processCategoryImportJob(job, graphqlClient);
-          } else if (job.resourceType === "shared-modifiers") {
-            await processSharedModifiersImportJob(job, graphqlClient);
-          } else if (job.resourceType === "shared-options") {
-            await processSharedOptionsImportJob(job, graphqlClient);
-          } else {
-            await processImportJob(job, graphqlClient);
-            // Check if import job is complete (processImportJob updates metadata)
-            const updatedJob = await db.getTranslationJobs(job.storeHash);
-            const currentJob = updatedJob.find((j) => j.id === job.id);
-            if (currentJob) {
-              const importMetadata = getImportChunkMetadata(currentJob);
-              if (importMetadata && importMetadata.isComplete) {
-                await db.updateTranslationJob(job.id, {
-                  status: "completed",
-                });
-              }
-              // If not complete, status is already set to "pending" by processImportJob
-              continue; // Skip the "completed" update below
-            }
-          }
+          await processImportJobByType(job, graphqlClient);
         } else {
-          let fileUrl;
-          if (job.resourceType === "categories") {
-            fileUrl = await processCategoryExportJob(
-              job,
-              graphqlClient,
-              restClient
-            );
-          } else if (job.resourceType === "shared-modifiers") {
-            fileUrl = await processSharedModifiersExportJob(
-              job,
-              graphqlClient,
-              restClient
-            );
-          } else if (job.resourceType === "shared-options") {
-            fileUrl = await processSharedOptionsExportJob(
-              job,
-              graphqlClient,
-              restClient
-            );
-          } else {
-            fileUrl = await processExportJob(job, graphqlClient, restClient);
-            // Only update to completed if fileUrl is not null (job is complete)
-            if (fileUrl !== null) {
-              await db.updateTranslationJob(job.id, {
-                status: "completed",
-                fileUrl: fileUrl,
-              });
-            }
-            // If fileUrl is null, the job is not complete and status is already set to "pending" by processExportJob
-            continue; // Skip the "completed" update below
-          }
-          job.fileUrl = fileUrl;
+          await processExportJobByType(job, graphqlClient, restClient);
         }
-
-        // Update job status to completed (only for non-chunked jobs)
-        await db.updateTranslationJob(job.id, {
-          status: "completed",
-          fileUrl: job.fileUrl,
-        });
       } catch (error: any) {
         // Update job status to failed
         await db.updateTranslationJob(job.id, {

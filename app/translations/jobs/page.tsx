@@ -37,6 +37,14 @@ import ErrorMessage from "@/components/error-message";
 import { LoadingScreen } from "@/components/loading-indicator";
 import { Suspense } from "react";
 
+type ChunkMetadata = {
+  chunkIndex?: number;
+  totalChunks?: number;
+  processedProducts?: number;
+  totalProducts?: number;
+  isComplete?: boolean;
+};
+
 type TranslationJob = {
   id: number;
   status: "pending" | "processing" | "completed" | "failed";
@@ -48,6 +56,7 @@ type TranslationJob = {
   error?: string;
   createdAt: string;
   updatedAt: string;
+  metadata?: ChunkMetadata | null;
 };
 
 type CSVPreview = {
@@ -118,7 +127,9 @@ function TranslationsJobsContent() {
   const fetchJobs = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await fetch(`/api/translations/jobs?context=${context}`);
+      const response = await fetch(`/api/translations/jobs?context=${context}`, {
+        cache: 'no-store', // Ensure we always get fresh data
+      });
       if (!response.ok) throw new Error(t("errors.fetchJobs"));
       const data = await response.json();
       setJobs(data);
@@ -363,6 +374,27 @@ function TranslationsJobsContent() {
     }
   }, [context, fetchJobs]);
 
+  // Auto-refresh jobs every 10 seconds, but only if there are pending or processing jobs
+  useEffect(() => {
+    if (!context) return;
+
+    const intervalId = setInterval(() => {
+      // Only refresh if there are jobs in pending or processing status
+      const hasActiveJobs = jobs.some(
+        (job) => job.status === "pending" || job.status === "processing"
+      );
+
+      if (hasActiveJobs) {
+        fetchJobs();
+      }
+    }, 10000); // 10 seconds
+
+    // Cleanup interval on unmount
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [context, fetchJobs, jobs]);
+
   const handleViewErrors = (jobId: number) => {
     router.push(`/translations/jobs/${jobId}/errors${context ? `?context=${context}` : ''}`);
   };
@@ -444,28 +476,102 @@ function TranslationsJobsContent() {
     {
       header: t("columnHeaders.status"),
       hash: "status",
-      render: (item: TranslationJob) => (
-        <Flex alignItems="center" marginBottom="none">
-          {item.status === "processing" && (
-            <Box marginRight="xSmall">
-              <ProgressCircle size="xSmall" />
-            </Box>
-          )}
-          <Text>{t(`status_${item.status}`)}</Text>
-          {item.error && (
-            <Tooltip
-              trigger={
-                <Box display="inline-block">
-                  <Text color="danger">(!)</Text>
+      render: (item: TranslationJob) => {
+        // Check if job is completed
+        const isCompleted = item.status === "completed" || item.metadata?.isComplete === true;
+        
+        // Check if job is chunked and in progress (only if not completed)
+        const isChunked = !isCompleted && item.metadata && (
+          (item.metadata.chunkIndex !== undefined) || 
+          (item.metadata.processedProducts !== undefined && !item.metadata.isComplete)
+        );
+        const isInProgress = !isCompleted && (item.status === "processing" || (item.status === "pending" && isChunked));
+        
+        // Get chunk progress info and calculate percentage from chunk metadata (only if not completed)
+        const chunkInfo = item.metadata;
+        let progressPercentage = 0;
+        let progressText = "";
+        
+        if (!isCompleted && chunkInfo) {
+          // Calculate percentage based on chunk metadata - same model for both export and import
+          if (chunkInfo.chunkIndex !== undefined && chunkInfo.totalChunks && chunkInfo.totalChunks > 0) {
+            // Both Export and Import: calculate based on chunks completed (chunkIndex is 0-based, so add 1)
+            // chunkIndex represents the last completed chunk, so we show progress based on completed chunks
+            progressPercentage = Math.min(100, Math.round(((chunkInfo.chunkIndex + 1) / chunkInfo.totalChunks) * 100));
+            progressText = ` (Chunk ${chunkInfo.chunkIndex + 1}/${chunkInfo.totalChunks} - ${progressPercentage}%)`;
+          } else if (chunkInfo.processedProducts !== undefined && chunkInfo.totalProducts && chunkInfo.totalProducts > 0) {
+            // Fallback: calculate based on products processed (for backward compatibility with old jobs)
+            progressPercentage = Math.min(100, Math.round((chunkInfo.processedProducts / chunkInfo.totalProducts) * 100));
+            progressText = ` (${chunkInfo.processedProducts}/${chunkInfo.totalProducts} - ${progressPercentage}%)`;
+          }
+        }
+        
+        // Show progress bar if job is in progress and we have metadata (even if pending between chunks), but not if completed
+        const shouldShowProgressBar = !isCompleted && isChunked && progressPercentage > 0;
+
+        return (
+          <Flex flexDirection="column" alignItems="flex-start" marginBottom="none" style={{ width: '100%' }}>
+            <Flex alignItems="center" marginBottom="none">
+              {isInProgress && (
+                <Box marginRight="xSmall">
+                  <ProgressCircle size="xSmall" />
                 </Box>
-              }
-              placement="right-end"
-            >
-              {item.error}
-            </Tooltip>
-          )}
-        </Flex>
-      ),
+              )}
+              <Text>
+                {t(`status_${item.status}`)}
+                {progressText && <Text as="span" color="secondary60">{progressText}</Text>}
+              </Text>
+              {item.error && (
+                <Tooltip
+                  trigger={
+                    <Box display="inline-block">
+                      <Text color="danger">(!)</Text>
+                    </Box>
+                  }
+                  placement="right-end"
+                >
+                  {item.error}
+                </Tooltip>
+              )}
+            </Flex>
+            {shouldShowProgressBar && (
+              <Box marginTop="xSmall" style={{ width: '100%', maxWidth: '200px' }}>
+                <Box
+                  style={{
+                    width: '100%',
+                    height: '8px',
+                    backgroundColor: '#e0e0e0',
+                    borderRadius: '4px',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <Box
+                    style={{
+                      width: `${progressPercentage}%`,
+                      height: '100%',
+                      backgroundColor: '#0066cc',
+                      transition: 'width 0.3s ease',
+                      borderRadius: '4px',
+                    }}
+                  />
+                </Box>
+                <Text 
+                  color="secondary60" 
+                  marginTop="xxSmall" 
+                  style={{ fontSize: '0.75rem' }}
+                >
+                  {progressPercentage}% complete
+                </Text>
+              </Box>
+            )}
+            {isChunked && !shouldShowProgressBar && (
+              <Text color="secondary60" marginTop="xxSmall" style={{ fontSize: '0.875rem' }}>
+                Processing in chunks...
+              </Text>
+            )}
+          </Flex>
+        );
+      },
     },
     {
       header: t("columnHeaders.channel"),
