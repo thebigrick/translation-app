@@ -99,7 +99,7 @@ function TranslationsJobErrorsContent({ jobId }: { jobId: string }) {
 
   const columns = [
     {
-      header: errors?.[0]?.resourceType == "categories" ? t("columnHeaders.categoryId") : errors?.[0]?.resourceType == "products" ? t("columnHeaders.productId") : t("columnHeaders.entityId"),
+      header: errors?.[0]?.resourceType == "categories" ? t("columnHeaders.categoryId") : errors?.[0]?.resourceType == "brands" ? t("columnHeaders.brandId") : errors?.[0]?.resourceType == "products" ? t("columnHeaders.productId") : t("columnHeaders.entityId"),
       hash: "entityId",
       render: (error: TranslationErrorWithRawData) => error.entityId == 0 ? "N/A" : error.entityId,
     },
@@ -226,7 +226,7 @@ function TranslationsJobErrorsContent({ jobId }: { jobId: string }) {
               >
                 <Flex flexDirection="column" flexGap="small">
                   <Flex justifyContent="space-between" alignItems="center">
-                    <Text bold>{selectedError.resourceType == "categories" ? t("columnHeaders.categoryId") : selectedError.resourceType == "products" ? t("columnHeaders.productId") : t("columnHeaders.entityId")}: {selectedError.entityId}</Text>
+                    <Text bold>{selectedError.resourceType == "categories" ? t("columnHeaders.categoryId") : selectedError.resourceType == "brands" ? t("columnHeaders.brandId") : selectedError.resourceType == "products" ? t("columnHeaders.productId") : t("columnHeaders.entityId")}: {selectedError.entityId}</Text>
                     <Text color="secondary60">
                       {new Date(selectedError.createdAt).toLocaleString()}
                     </Text>

@@ -31,6 +31,12 @@ import {
   formatCategoryDataForCSV,
 } from "@/lib/utils/category-translation-helpers";
 import {
+  BrandTranslationRecord,
+  prepareBrandTranslationData,
+  generateBrandCSVHeaders,
+  formatBrandDataForCSV,
+} from "@/lib/utils/brand-translation-helpers";
+import {
   SharedModifierTranslationRecord,
   validateCSVRecord,
   prepareSharedModifierTranslationData,
@@ -284,6 +290,7 @@ async function parseCSV<T>(text: string): Promise<T[]> {
         if (
           field === "productId" ||
           field === "categoryId" ||
+          field === "brandId" ||
           field === "modifierId" ||
           field === "valueId"
         ) {
@@ -411,6 +418,7 @@ const CONFIG = {
   // Pagination settings
   PRODUCTS_PER_PAGE: Number(process.env.TRANSLATION_PRODUCTS_PER_PAGE) || 50,
   CATEGORIES_PER_PAGE: Number(process.env.TRANSLATION_CATEGORIES_PER_PAGE) || 50,
+  BRANDS_PER_PAGE: Number(process.env.TRANSLATION_BRANDS_PER_PAGE) || 50,
   SHARED_MODIFIERS_PER_PAGE: Number(process.env.TRANSLATION_SHARED_MODIFIERS_PER_PAGE) || 50,
   SHARED_OPTIONS_PER_PAGE: Number(process.env.TRANSLATION_SHARED_OPTIONS_PER_PAGE) || 50,
 
@@ -2012,6 +2020,269 @@ async function processCategoryExportJob(
   }
 }
 
+// Process a brand import job
+async function processBrandImportJob(
+  job: TranslationJob,
+  graphqlClient: any
+) {
+  console.log(
+    `[Brand Import] Starting import job ${job.id} for channel ${job.channelId} and locale ${job.locale}`
+  );
+
+  try {
+    if (!job.fileUrl) {
+      throw new Error("No file URL provided for import job");
+    }
+
+    // Get store token and create REST client
+    const accessToken = await db.getStoreToken(job.storeHash);
+    if (!accessToken) {
+      throw new Error("Store token not found");
+    }
+    const restClient = createRestClient({
+      accessToken,
+      storeHash: job.storeHash,
+    });
+
+    // Fetch channel locales to get default locale
+    console.log(
+      `[Brand Import] Fetching channel locales for channel ${job.channelId}`
+    );
+    const { data: localesData } = await restClient.getChannelLocales(
+      job.channelId
+    );
+    const defaultLocale =
+      localesData.find((locale) => locale.is_default)?.code ||
+      fallbackLocale.code;
+    console.log(`[Brand Import] Using default locale: ${defaultLocale}`);
+
+    // Fetch and parse CSV file
+    console.log(`[Brand Import] Fetching CSV from ${job.fileUrl}`);
+    console.log("[Brand Import] Parsing CSV content");
+    const records = await fetchAndParseCSV<BrandTranslationRecord>(job.fileUrl!);
+    console.log(`[Brand Import] Found ${records.length} records to import`);
+
+    // Group records in batches for efficiency
+    const batchSize = 20; // Process 20 brands at a time
+    for (let i = 0; i < records.length; i += batchSize) {
+      const batch = records.slice(i, i + batchSize);
+
+      try {
+        console.log(
+          `[Brand Import] Processing batch ${Math.floor(i / batchSize) + 1}`
+        );
+
+        // Prepare brands for update
+        const brands = batch
+          .map((record) => prepareBrandTranslationData(record, job.locale))
+          .filter((brand) => brand.fields.length > 0); // Skip brands with no fields to update
+
+        if (brands.length === 0) {
+          console.log(
+            "[Brand Import] No fields to update in this batch, skipping"
+          );
+          continue;
+        }
+
+        // Update brands
+        await graphqlClient.updateBrandTranslations({
+          channelId: job.channelId,
+          locale: job.locale,
+          brands,
+        });
+
+        console.log(
+          `[Brand Import] Successfully updated ${brands.length} brands`
+        );
+      } catch (error) {
+        console.error(`[Brand Import] Error updating batch:`, error);
+        const errorWithResponse = error as Error & {
+          response?: any;
+          errors?: any;
+        };
+        // Log the error to the database
+        await logTranslationError({
+          jobId: job.id,
+          entityId: 0, // Not applicable for brands
+          lineNumber: i + 1,
+          errorType: "api_error",
+          errorMessage: errorWithResponse.message,
+          rawData: JSON.stringify({
+            batch,
+            response: errorWithResponse.errors || errorWithResponse.response,
+          }),
+        });
+        // Continue with next batch
+      }
+
+      // Add a small delay between batches for rate limiting
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    console.log(`[Brand Import] Job ${job.id} completed successfully`);
+  } catch (error) {
+    console.error("[Brand Import] Job failed:", error);
+    throw error;
+  }
+}
+
+// Process a brand export job
+async function processBrandExportJob(
+  job: TranslationJob,
+  graphqlClient: any,
+  restClient: BigCommerceRestClient
+) {
+  console.log(
+    `[Brand Export] Starting export job ${job.id} for channel ${job.channelId} and locale ${job.locale}`
+  );
+
+  try {
+    // Get channel details first
+    console.log(
+      `[Brand Export] Fetching channel details for channel ${job.channelId}`
+    );
+    const channelResponse = await restClient.getChannel(job.channelId);
+    const channelName =
+      channelResponse.data?.name || `channel-${job.channelId}`;
+
+    // Get channel locales to determine default locale
+    console.log(
+      `[Brand Export] Fetching channel locales for channel ${job.channelId}`
+    );
+    const { data: localesData } = await restClient.getChannelLocales(
+      job.channelId
+    );
+    const defaultLocale =
+      localesData.find((locale) => locale.is_default)?.code ||
+      fallbackLocale.code;
+    console.log(`[Brand Export] Using default locale: ${defaultLocale}`);
+
+    // Get brand translations with pagination
+    console.log(
+      `[Brand Export] Fetching brand translations for channel ${job.channelId} and locale ${job.locale}`
+    );
+    const brandEdges: any[] = [];
+    let cursor: string | undefined;
+    let pageNumber = 1;
+
+    while (true) {
+      const translationsPage = await graphqlClient.getBrandTranslations({
+        channelId: job.channelId,
+        locale: job.locale,
+        first: CONFIG.BRANDS_PER_PAGE,
+        after: cursor,
+      });
+
+      const edges = translationsPage.edges || [];
+      console.log(
+        `[Brand Export] Page ${pageNumber} returned ${edges.length} brand translations`
+      );
+      brandEdges.push(...edges);
+
+      const pageInfo = translationsPage.pageInfo;
+      if (pageInfo?.hasNextPage && pageInfo.endCursor) {
+        cursor = pageInfo.endCursor;
+        pageNumber += 1;
+        console.log(
+          `[Brand Export] Waiting ${CONFIG.MIN_DELAY_BETWEEN_PAGES}ms before fetching next page`
+        );
+        await new Promise((resolve) =>
+          setTimeout(resolve, CONFIG.MIN_DELAY_BETWEEN_PAGES)
+        );
+      } else {
+        break;
+      }
+    }
+
+    console.log(
+      `[Brand Export] Found ${brandEdges.length} brand translations`
+    );
+
+    if (!brandEdges.length) {
+      throw new Error("No brand translations found for export");
+    }
+
+    // Format translations for CSV
+    const brandRecords = brandEdges.map((edge: any) => {
+      const node = edge.node;
+      return formatBrandDataForCSV(
+        node.resourceId,
+        node.fields,
+        defaultLocale,
+        job.locale
+      );
+    });
+
+    console.log(
+      `[Brand Export] Creating CSV for ${brandRecords.length} brands`
+    );
+
+    // Generate CSV content
+    const headers = generateBrandCSVHeaders(defaultLocale, job.locale);
+    const csvConfig: UnparseConfig = {
+      quotes: true,
+      quoteChar: '"',
+      escapeChar: '"',
+      delimiter: ",",
+      header: true,
+      newline: "\n",
+      skipEmptyLines: true,
+    };
+
+    // Format records for CSV
+    const csvData = brandRecords.map((record: any) => {
+      const row: Record<string, any> = {};
+      headers.forEach((header) => {
+        const value = record[header];
+        row[header] = value === undefined || value === null ? "" : value;
+      });
+      return row;
+    });
+
+    const csvContent = Papa.unparse(
+      {
+        fields: headers,
+        data: csvData,
+      },
+      csvConfig
+    );
+
+    // Upload to blob storage with unique filename including channel name
+    console.log("[Brand Export] Uploading CSV to blob storage");
+    const uniqueFilename = generateUniqueExportFilename(
+      job.id,
+      job.storeHash,
+      job.locale,
+      channelName,
+      "brands"
+    );
+    const { url } = await put(uniqueFilename, csvContent, {
+      access: "public",
+      contentType: "text/csv",
+      addRandomSuffix: false,
+    });
+
+    console.log(`[Brand Export] Upload complete. File URL: ${url}`);
+    return url;
+  } catch (error) {
+    console.error("[Brand Export] Job failed:", error);
+    // Log the error to the database
+    const errorWithResponse = error as Error & { response?: any };
+    await logTranslationError({
+      jobId: job.id,
+      entityId: 0, // Not applicable for brands
+      lineNumber: 0,
+      errorType: "export_error",
+      errorMessage: errorWithResponse.message,
+      rawData: JSON.stringify({
+        jobId: job.id,
+        response: errorWithResponse.response,
+      }),
+    });
+    throw error;
+  }
+}
+
 // Process a shared modifiers import job
 async function processSharedModifiersImportJob(
   job: TranslationJob,
@@ -2775,6 +3046,9 @@ async function processImportJobByType(
   if (job.resourceType === "categories") {
     await processCategoryImportJob(job, graphqlClient);
     await db.updateTranslationJob(job.id, { status: "completed" });
+  } else if (job.resourceType === "brands") {
+    await processBrandImportJob(job, graphqlClient);
+    await db.updateTranslationJob(job.id, { status: "completed" });
   } else if (job.resourceType === "shared-modifiers") {
     await processSharedModifiersImportJob(job, graphqlClient);
     await db.updateTranslationJob(job.id, { status: "completed" });
@@ -2807,6 +3081,12 @@ async function processExportJobByType(
 
   if (job.resourceType === "categories") {
     fileUrl = await processCategoryExportJob(job, graphqlClient, restClient);
+    await db.updateTranslationJob(job.id, {
+      status: "completed",
+      fileUrl: fileUrl,
+    });
+  } else if (job.resourceType === "brands") {
+    fileUrl = await processBrandExportJob(job, graphqlClient, restClient);
     await db.updateTranslationJob(job.id, {
       status: "completed",
       fileUrl: fileUrl,

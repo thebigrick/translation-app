@@ -20,6 +20,7 @@ import ErrorMessage from "@/components/error-message";
 import { LoadingScreen } from "@/components/loading-indicator";
 import { Suspense } from "react";
 import CategoriesTable from "@/components/translations-manage/categories-table";
+import BrandsTable from "@/components/translations-manage/brands-table";
 import SharedOptionsTable from "@/components/translations-manage/shared-options-table";
 import SharedModifiersTable from "@/components/translations-manage/shared-modifiers-table";
 
@@ -195,6 +196,10 @@ function TranslationsManageContent() {
       title: t("tabs.categories"),
     },
     {
+      id: "brands",
+      title: t("tabs.brands"),
+    },
+    {
       id: "shared-options",
       title: t("tabs.sharedOptions"),
     },
@@ -314,6 +319,15 @@ function TranslationsManageContent() {
 
               {activeTab === "categories" && (
                 <CategoriesTable
+                  context={context}
+                  channelId={selectedChannel!}
+                  locale={selectedLocale}
+                  defaultLocale={defaultLocale}
+                />
+              )}
+
+              {activeTab === "brands" && (
+                <BrandsTable
                   context={context}
                   channelId={selectedChannel!}
                   locale={selectedLocale}

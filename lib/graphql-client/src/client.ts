@@ -47,6 +47,14 @@ import {
   createDeleteCategoryTranslationsVariables,
 } from "./queries/category.tada";
 import {
+  GetBrandTranslationsDocument,
+  UpdateBrandTranslationsDocument,
+  DeleteBrandTranslationsDocument,
+  createGetBrandTranslationsVariables,
+  createUpdateBrandTranslationsVariables,
+  createDeleteBrandTranslationsVariables,
+} from "./queries/brand.tada";
+import {
   GetSharedProductModifiersDocument,
   SetSharedProductModifiersInformationDocument,
   createGetSharedProductModifiersVariables,
@@ -1418,6 +1426,91 @@ export class GraphQLClient {
       const errors = response.data.translation.deleteTranslations.errors;
       throw new Error(
         `Failed to delete category translations: ${errors
+          .map((e) => e.message)
+          .join(", ")}`
+      );
+    }
+
+    return response.data;
+  }
+
+  // Brand Methods
+  async getBrandTranslations(params: {
+    channelId: number;
+    locale: string;
+    first?: number;
+    after?: string | null;
+  }) {
+    type Response = ResultOf<typeof GetBrandTranslationsDocument>;
+    type TranslationsType = NonNullable<Response["store"]>["translations"];
+
+    const variables = createGetBrandTranslationsVariables(params);
+
+    const response = await this.request<Response>(
+      { query: print(GetBrandTranslationsDocument) },
+      variables
+    );
+
+    if (!response.data?.store?.translations) {
+      throw new Error("Failed to get brand translations");
+    }
+
+    return response.data.store.translations;
+  }
+
+  async updateBrandTranslations(params: {
+    channelId: number;
+    locale: string;
+    brands: Array<{
+      brandId: number;
+      fields: Array<{
+        fieldName: string;
+        value: string;
+      }>;
+    }>;
+  }) {
+    type Response = ResultOf<typeof UpdateBrandTranslationsDocument>;
+
+    const variables = createUpdateBrandTranslationsVariables(params);
+
+    const response = await this.request<Response>(
+      { query: print(UpdateBrandTranslationsDocument) },
+      variables
+    );
+
+    if (response.data?.translation?.updateTranslations?.errors?.length) {
+      const errors = response.data.translation.updateTranslations.errors;
+      throw new Error(
+        `Failed to update brand translations: ${errors
+          .map((e) => e.message)
+          .join(", ")}`
+      );
+    }
+
+    return response.data;
+  }
+
+  async deleteBrandTranslations(params: {
+    channelId: number;
+    locale: string;
+    brands: Array<{
+      brandId: number;
+      fields: string[];
+    }>;
+  }) {
+    type Response = ResultOf<typeof DeleteBrandTranslationsDocument>;
+
+    const variables = createDeleteBrandTranslationsVariables(params);
+
+    const response = await this.request<Response>(
+      { query: print(DeleteBrandTranslationsDocument) },
+      variables
+    );
+
+    if (response.data?.translation?.deleteTranslations?.errors?.length) {
+      const errors = response.data.translation.deleteTranslations.errors;
+      throw new Error(
+        `Failed to delete brand translations: ${errors
           .map((e) => e.message)
           .join(", ")}`
       );

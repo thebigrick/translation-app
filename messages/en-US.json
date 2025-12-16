@@ -145,6 +145,7 @@
       "tabs": {
         "products": "Products",
         "categories": "Categories",
+        "brands": "Brands",
         "sharedOptions": "Shared Options",
         "sharedModifiers": "Shared Modifiers"
       },
@@ -172,6 +173,7 @@
         "export": "Export",
         "productId": "Product ID",
         "categoryId": "Category ID",
+        "brandId": "Brand ID",
         "entityId": "Entity ID",
         "lineNumber": "Line Number",
         "errorType": "Error Type",
@@ -182,6 +184,7 @@
       "resourceTypes": {
         "products": "Products",
         "categories": "Categories",
+        "brands": "Brands",
         "sharedModifiers": "Shared Modifiers",
         "sharedOptions": "Shared Options"
       },
