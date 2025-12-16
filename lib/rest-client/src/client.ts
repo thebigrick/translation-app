@@ -1,5 +1,6 @@
 import debug from 'debug';
 import { RestClientConfig, RequestOptions, StoreInformationResponse } from './types';
+import { EmailTemplate, EmailTemplateUpdateData } from './types/email-templates';
 
 export class BigCommerceRestClient {
   private config: RestClientConfig;
@@ -112,12 +113,24 @@ export class BigCommerceRestClient {
     }
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ message: "Unknown error" }));
+      let error: any;
+      try {
+        error = await response.json();
+      } catch {
+        const text = await response.text().catch(() => "Unknown error");
+        error = { message: text };
+      }
+      
       this.logger('Request failed:', {
         status: response.status,
-        error
+        error,
+        url,
       });
-      throw new Error(error.message || `HTTP error! status: ${response.status}`);
+      
+      const errorWithStatus = new Error(error.message || `HTTP error! status: ${response.status}`);
+      (errorWithStatus as any).status = response.status;
+      (errorWithStatus as any).response = error;
+      throw errorWithStatus;
     }
 
     const data = await response.json();
@@ -217,5 +230,30 @@ export class BigCommerceRestClient {
   // Store Information
   async getStoreInformation() {
     return this.request<StoreInformationResponse>(`/v2/store.json`, { method: "GET" });
+  }
+
+  // Email Templates
+  async getEmailTemplates(channelId?: number) {
+    const query = channelId ? `?channel_id=${channelId}` : '';
+    return this.request<{data: EmailTemplate[]}>(`/v3/marketing/email-templates${query}`, { method: "GET" });
+  }
+
+  async getEmailTemplate(templateName: string, channelId?: number) {
+    const query = channelId ? `?channel_id=${channelId}` : '';
+    return this.request<{data: EmailTemplate}>(`/v3/marketing/email-templates/${templateName}${query}`, { method: "GET" });
+  }
+
+  async updateEmailTemplate(templateName: string, data: EmailTemplateUpdateData, channelId?: number) {
+    const query = channelId ? `?channel_id=${channelId}` : '';
+    return this.request<{data: EmailTemplate}>(`/v3/marketing/email-templates/${templateName}${query}`, {
+      method: "PUT",
+      body: data,
+    });
+  }
+
+  async deleteEmailTemplateOverride(templateName: string, channelId: number) {
+    return this.request(`/v3/marketing/email-templates/${templateName}?channel_id=${channelId}`, {
+      method: "DELETE",
+    });
   }
 } 

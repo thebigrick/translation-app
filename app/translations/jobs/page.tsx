@@ -49,7 +49,7 @@ type TranslationJob = {
   id: number;
   status: "pending" | "processing" | "completed" | "failed";
   jobType: "import" | "export";
-  resourceType: "products" | "categories" | "brands" | "shared-modifiers" | "shared-options";
+  resourceType: "products" | "categories" | "brands" | "email-templates" | "shared-modifiers" | "shared-options";
   fileUrl?: string;
   channelId: number;
   locale: string;
@@ -759,6 +759,7 @@ function TranslationsJobsContent() {
                     { value: "products", label: t("resourceTypes.products") },
                     { value: "categories", label: t("resourceTypes.categories") },
                     { value: "brands", label: t("resourceTypes.brands") },
+                    { value: "email-templates", label: t("resourceTypes.email-templates") },
                     { value: "shared-modifiers", label: t("resourceTypes.sharedModifiers") },
                     { value: "shared-options", label: t("resourceTypes.sharedOptions") }
                   ]}
@@ -827,6 +828,7 @@ function TranslationsJobsContent() {
                     { value: "products", label: t("resourceTypes.products") },
                     { value: "categories", label: t("resourceTypes.categories") },
                     { value: "brands", label: t("resourceTypes.brands") },
+                    { value: "email-templates", label: t("resourceTypes.email-templates") },
                     { value: "shared-modifiers", label: t("resourceTypes.sharedModifiers") },
                     { value: "shared-options", label: t("resourceTypes.sharedOptions") }
                   ]}

@@ -37,6 +37,14 @@ import {
   formatBrandDataForCSV,
 } from "@/lib/utils/brand-translation-helpers";
 import {
+  EmailTemplateTranslationRecord,
+  prepareEmailTemplateTranslationData,
+  generateEmailTemplateCSVHeaders,
+  formatEmailTemplateDataForCSV,
+  getTemplateTypeDisplayName,
+  extractTranslationKeys,
+} from "@/lib/utils/email-template-helpers";
+import {
   SharedModifierTranslationRecord,
   validateCSVRecord,
   prepareSharedModifierTranslationData,
@@ -286,7 +294,7 @@ async function parseCSV<T>(text: string): Promise<T[]> {
       transform: (value: string, field: string) => {
         const trimmed = value.trim();
 
-        // Transform ID fields to number
+        // Transform ID fields to number (but not templateName which is a string)
         if (
           field === "productId" ||
           field === "categoryId" ||
@@ -303,6 +311,11 @@ async function parseCSV<T>(text: string): Promise<T[]> {
             throw new Error(`Invalid ID in CSV for field ${field}: ${value}`);
           }
           return parsed;
+        }
+
+        // templateName is a string, not a number
+        if (field === "templateName") {
+          return trimmed || undefined;
         }
 
         return trimmed;
@@ -419,6 +432,7 @@ const CONFIG = {
   PRODUCTS_PER_PAGE: Number(process.env.TRANSLATION_PRODUCTS_PER_PAGE) || 50,
   CATEGORIES_PER_PAGE: Number(process.env.TRANSLATION_CATEGORIES_PER_PAGE) || 50,
   BRANDS_PER_PAGE: Number(process.env.TRANSLATION_BRANDS_PER_PAGE) || 50,
+  EMAIL_TEMPLATES_PER_PAGE: Number(process.env.TRANSLATION_EMAIL_TEMPLATES_PER_PAGE) || 50,
   SHARED_MODIFIERS_PER_PAGE: Number(process.env.TRANSLATION_SHARED_MODIFIERS_PER_PAGE) || 50,
   SHARED_OPTIONS_PER_PAGE: Number(process.env.TRANSLATION_SHARED_OPTIONS_PER_PAGE) || 50,
 
@@ -2283,6 +2297,363 @@ async function processBrandExportJob(
   }
 }
 
+// Process an email templates import job
+async function processEmailTemplatesImportJob(
+  job: TranslationJob,
+  restClient: BigCommerceRestClient
+) {
+  console.log(
+    `[Email Templates Import] Starting import job ${job.id} for channel ${job.channelId} and locale ${job.locale}`
+  );
+
+  try {
+    if (!job.fileUrl) {
+      throw new Error("No file URL provided for import job");
+    }
+
+    // Fetch channel locales to get default locale
+    console.log(
+      `[Email Templates Import] Fetching channel locales for channel ${job.channelId}`
+    );
+    const { data: localesData } = await restClient.getChannelLocales(
+      job.channelId
+    );
+    const defaultLocale =
+      localesData.find((locale) => locale.is_default)?.code ||
+      fallbackLocale.code;
+    console.log(`[Email Templates Import] Using default locale: ${defaultLocale}`);
+
+    // Fetch and parse CSV file
+    console.log(`[Email Templates Import] Fetching CSV from ${job.fileUrl}`);
+    console.log("[Email Templates Import] Parsing CSV content");
+    const records = await fetchAndParseCSV<EmailTemplateTranslationRecord>(job.fileUrl!);
+    console.log(`[Email Templates Import] Found ${records.length} records to import`);
+
+    // Process each template
+    for (const record of records) {
+      try {
+        const templateName = record.templateName;
+        if (!templateName) {
+          console.warn("[Email Templates Import] Skipping record without templateName");
+          continue;
+        }
+
+        console.log(`[Email Templates Import] Processing template: ${templateName}`);
+
+        // Get current template to preserve existing data
+        // Strategy: Always get global template first, then check for channel override
+        let currentTemplate;
+        
+        // Step 1: Get global template (always exists)
+        try {
+          const globalTemplateResponse = await restClient.getEmailTemplate(
+            templateName,
+            undefined
+          );
+          currentTemplate = globalTemplateResponse.data;
+        } catch (globalError: any) {
+          console.error(`[Email Templates Import] Error fetching global template:`, globalError);
+          throw new Error(`Template ${templateName} not found: ${globalError.message}`);
+        }
+
+        // Step 2: If channelId is provided, try to get channel override and merge it
+        if (job.channelId) {
+          try {
+            const channelTemplateResponse = await restClient.getEmailTemplate(
+              templateName,
+              job.channelId
+            );
+            const channelTemplate = channelTemplateResponse.data;
+            
+            // Merge channel override with global template
+            currentTemplate = {
+              ...currentTemplate,
+              subject: channelTemplate.subject || currentTemplate.subject,
+              body: channelTemplate.body || currentTemplate.body,
+              // Merge translations: channel override translations take precedence
+              translations: [
+                ...(currentTemplate.translations || []).filter(
+                  (t: any) => 
+                    !channelTemplate.translations?.some((ct: any) => ct.locale === t.locale)
+                ),
+                ...(channelTemplate.translations || []),
+              ],
+            };
+          } catch (channelError: any) {
+            // Channel override doesn't exist - this is OK, we'll use global template
+            if (channelError.status === 404 || channelError.message?.includes('404')) {
+              console.log(`[Email Templates Import] No channel override found, using global template`);
+            } else {
+              console.warn(`[Email Templates Import] Error fetching channel override:`, channelError.message);
+            }
+          }
+        }
+
+        // Normalize locale to 2-letter format
+        let normalizedLocale = String(job.locale || '').trim().toLowerCase();
+        if (normalizedLocale.includes('-')) {
+          normalizedLocale = normalizedLocale.split('-')[0];
+        }
+        
+        if (normalizedLocale.length !== 2 || !/^[a-z]{2}$/.test(normalizedLocale)) {
+          console.warn(`[Email Templates Import] Invalid locale format: ${job.locale}, skipping`);
+          continue;
+        }
+
+        // Extract keys from CSV record
+        // CSV format: key_reset_password_en, key_reset_password_it, etc.
+        const keys: Record<string, string> = {};
+        Object.keys(record).forEach(key => {
+          if (key.startsWith('key_') && key.endsWith(`_${normalizedLocale}`)) {
+            // Extract key name: key_reset_password_en -> reset_password
+            const keyName = key.replace(/^key_/, '').replace(`_${normalizedLocale}`, '');
+            const value = record[key];
+            if (value && typeof value === 'string' && value.trim().length > 0) {
+              keys[keyName] = String(value).trim();
+            }
+          }
+        });
+
+        if (Object.keys(keys).length === 0) {
+          console.warn(`[Email Templates Import] No keys found for locale ${normalizedLocale} in record, skipping`);
+          continue;
+        }
+
+        // Get existing translations (array format)
+        const existingTranslations: any[] = Array.isArray(currentTemplate.translations) 
+          ? [...currentTemplate.translations]
+          : [];
+
+        // Find existing translation for this locale
+        const existingTranslationIndex = existingTranslations.findIndex(
+          (t: any) => {
+            let tLocale = String(t.locale || '').trim().toLowerCase();
+            if (tLocale.includes('-')) {
+              tLocale = tLocale.split('-')[0];
+            }
+            return tLocale === normalizedLocale;
+          }
+        );
+
+        // Create or update translation with keys
+        const translation = {
+          locale: normalizedLocale,
+          keys: keys,
+        };
+
+        if (existingTranslationIndex >= 0) {
+          // Update existing translation - merge keys
+          existingTranslations[existingTranslationIndex] = {
+            ...existingTranslations[existingTranslationIndex],
+            keys: {
+              ...existingTranslations[existingTranslationIndex].keys,
+              ...keys,
+            },
+          };
+        } else {
+          // Add new translation
+          existingTranslations.push(translation);
+        }
+
+        // Update template - keep original subject/body, update translations
+        await restClient.updateEmailTemplate(
+          currentTemplate.type_id,
+          {
+            type_id: currentTemplate.type_id,
+            subject: currentTemplate.subject || '',
+            body: currentTemplate.body || '',
+            translations: existingTranslations,
+          },
+          undefined // Translations are always global
+        );
+
+        console.log(`[Email Templates Import] Successfully updated template: ${templateName}`);
+      } catch (error) {
+        console.error(`[Email Templates Import] Error updating template:`, error);
+        const errorWithResponse = error as Error & {
+          response?: any;
+        };
+        // Log the error to the database
+        await logTranslationError({
+          jobId: job.id,
+          entityId: 0,
+          lineNumber: records.indexOf(record) + 1,
+          errorType: "api_error",
+          errorMessage: errorWithResponse.message,
+          rawData: JSON.stringify({
+            record,
+            response: errorWithResponse.response,
+          }),
+        });
+        // Continue with next template
+      }
+
+      // Add a small delay between templates for rate limiting
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+
+    console.log(`[Email Templates Import] Job ${job.id} completed successfully`);
+  } catch (error) {
+    console.error("[Email Templates Import] Job failed:", error);
+    throw error;
+  }
+}
+
+// Process an email templates export job
+async function processEmailTemplatesExportJob(
+  job: TranslationJob,
+  restClient: BigCommerceRestClient
+) {
+  console.log(
+    `[Email Templates Export] Starting export job ${job.id} for channel ${job.channelId} and locale ${job.locale}`
+  );
+
+  try {
+    // Get channel details first
+    console.log(
+      `[Email Templates Export] Fetching channel details for channel ${job.channelId}`
+    );
+    const channelResponse = await restClient.getChannel(job.channelId);
+    const channelName =
+      channelResponse.data?.name || `channel-${job.channelId}`;
+
+    // Get channel locales to determine default locale
+    console.log(
+      `[Email Templates Export] Fetching channel locales for channel ${job.channelId}`
+    );
+    const { data: localesData } = await restClient.getChannelLocales(
+      job.channelId
+    );
+    const defaultLocale =
+      localesData.find((locale) => locale.is_default)?.code ||
+      fallbackLocale.code;
+    console.log(`[Email Templates Export] Using default locale: ${defaultLocale}`);
+
+    // Get all email templates
+    console.log(
+      `[Email Templates Export] Fetching email templates for channel ${job.channelId}`
+    );
+    const templatesResponse = await restClient.getEmailTemplates(job.channelId);
+    const templates = templatesResponse.data || [];
+
+    console.log(
+      `[Email Templates Export] Found ${templates.length} email templates`
+    );
+
+    if (!templates.length) {
+      throw new Error("No email templates found for export");
+    }
+
+    // Normalize locale for comparison
+    let normalizedTargetLocale = String(job.locale || '').trim().toLowerCase();
+    if (normalizedTargetLocale.includes('-')) {
+      normalizedTargetLocale = normalizedTargetLocale.split('-')[0];
+    }
+
+    // Format translations for CSV
+    const templateRecords = templates.map((template: any) => {
+      // Find translation for the target locale
+      const translation = template.translations?.find(
+        (t: any) => {
+          let tLocale = String(t.locale || '').trim().toLowerCase();
+          if (tLocale.includes('-')) {
+            tLocale = tLocale.split('-')[0];
+          }
+          return tLocale === normalizedTargetLocale;
+        }
+      );
+
+      return formatEmailTemplateDataForCSV(
+        template.name,
+        template.type_id,
+        template.subject,
+        template.body,
+        translation,
+        defaultLocale,
+        normalizedTargetLocale
+      );
+    });
+
+    console.log(
+      `[Email Templates Export] Creating CSV for ${templateRecords.length} templates`
+    );
+
+    // Generate CSV headers - include all keys found across templates
+    const allKeys = new Set<string>();
+    templates.forEach((template: any) => {
+      const keys = extractTranslationKeys(template.body || '');
+      keys.forEach(key => allKeys.add(key));
+    });
+
+    const headers = generateEmailTemplateCSVHeaders(
+      defaultLocale, 
+      normalizedTargetLocale,
+      Array.from(allKeys)
+    );
+    const csvConfig: UnparseConfig = {
+      quotes: true,
+      quoteChar: '"',
+      escapeChar: '"',
+      delimiter: ",",
+      header: true,
+      newline: "\n",
+      skipEmptyLines: true,
+    };
+
+    // Format records for CSV
+    const csvData = templateRecords.map((record: any) => {
+      const row: Record<string, any> = {};
+      headers.forEach((header) => {
+        const value = record[header];
+        row[header] = value === undefined || value === null ? "" : value;
+      });
+      return row;
+    });
+
+    const csvContent = Papa.unparse(
+      {
+        fields: headers,
+        data: csvData,
+      },
+      csvConfig
+    );
+
+    // Upload to blob storage with unique filename including channel name
+    console.log("[Email Templates Export] Uploading CSV to blob storage");
+    const uniqueFilename = generateUniqueExportFilename(
+      job.id,
+      job.storeHash,
+      job.locale,
+      channelName,
+      "email-templates"
+    );
+    const { url } = await put(uniqueFilename, csvContent, {
+      access: "public",
+      contentType: "text/csv",
+      addRandomSuffix: false,
+    });
+
+    console.log(`[Email Templates Export] Upload complete. File URL: ${url}`);
+    return url;
+  } catch (error) {
+    console.error("[Email Templates Export] Job failed:", error);
+    // Log the error to the database
+    const errorWithResponse = error as Error & { response?: any };
+    await logTranslationError({
+      jobId: job.id,
+      entityId: 0,
+      lineNumber: 0,
+      errorType: "export_error",
+      errorMessage: errorWithResponse.message,
+      rawData: JSON.stringify({
+        jobId: job.id,
+        response: errorWithResponse.response,
+      }),
+    });
+    throw error;
+  }
+}
+
 // Process a shared modifiers import job
 async function processSharedModifiersImportJob(
   job: TranslationJob,
@@ -3049,6 +3420,17 @@ async function processImportJobByType(
   } else if (job.resourceType === "brands") {
     await processBrandImportJob(job, graphqlClient);
     await db.updateTranslationJob(job.id, { status: "completed" });
+  } else if (job.resourceType === "email-templates") {
+    const accessToken = await db.getStoreToken(job.storeHash);
+    if (!accessToken) {
+      throw new Error("Store token not found");
+    }
+    const restClient = createRestClient({
+      accessToken,
+      storeHash: job.storeHash,
+    });
+    await processEmailTemplatesImportJob(job, restClient);
+    await db.updateTranslationJob(job.id, { status: "completed" });
   } else if (job.resourceType === "shared-modifiers") {
     await processSharedModifiersImportJob(job, graphqlClient);
     await db.updateTranslationJob(job.id, { status: "completed" });
@@ -3087,6 +3469,12 @@ async function processExportJobByType(
     });
   } else if (job.resourceType === "brands") {
     fileUrl = await processBrandExportJob(job, graphqlClient, restClient);
+    await db.updateTranslationJob(job.id, {
+      status: "completed",
+      fileUrl: fileUrl,
+    });
+  } else if (job.resourceType === "email-templates") {
+    fileUrl = await processEmailTemplatesExportJob(job, restClient);
     await db.updateTranslationJob(job.id, {
       status: "completed",
       fileUrl: fileUrl,
