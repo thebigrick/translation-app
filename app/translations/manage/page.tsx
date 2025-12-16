@@ -21,6 +21,7 @@ import { LoadingScreen } from "@/components/loading-indicator";
 import { Suspense } from "react";
 import CategoriesTable from "@/components/translations-manage/categories-table";
 import BrandsTable from "@/components/translations-manage/brands-table";
+import EmailTemplatesTable from "@/components/translations-manage/email-templates-table";
 import SharedOptionsTable from "@/components/translations-manage/shared-options-table";
 import SharedModifiersTable from "@/components/translations-manage/shared-modifiers-table";
 
@@ -124,6 +125,30 @@ function TranslationsManageContent() {
     localStorage.setItem("translations_manage_selected_locale", value);
   };
 
+  // Handle hash navigation to open correct tab and load channel/locale from URL
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash.replace('#', '');
+      if (hash && ['categories', 'brands', 'email-templates', 'shared-options', 'shared-modifiers'].includes(hash)) {
+        setActiveTab(hash);
+      }
+      
+      // Load channelId and locale from URL params if present
+      const urlChannelId = searchParams?.get("channelId");
+      const urlLocale = searchParams?.get("locale");
+      
+      if (urlChannelId && channels?.length) {
+        const channel = channels.find(c => c.channel_id === Number(urlChannelId));
+        if (channel) {
+          setSelectedChannel(channel.channel_id);
+          if (urlLocale && channel.locales.some(l => l.code === urlLocale && !l.is_default)) {
+            setSelectedLocale(urlLocale);
+          }
+        }
+      }
+    }
+  }, [channels, searchParams]);
+
   // Load saved preferences or set defaults when channels load
   useEffect(() => {
     if (channels?.length && !selectedChannel) {
@@ -198,6 +223,10 @@ function TranslationsManageContent() {
     {
       id: "brands",
       title: t("tabs.brands"),
+    },
+    {
+      id: "email-templates",
+      title: t("tabs.emailTemplates"),
     },
     {
       id: "shared-options",
@@ -328,6 +357,15 @@ function TranslationsManageContent() {
 
               {activeTab === "brands" && (
                 <BrandsTable
+                  context={context}
+                  channelId={selectedChannel!}
+                  locale={selectedLocale}
+                  defaultLocale={defaultLocale}
+                />
+              )}
+
+              {activeTab === "email-templates" && (
+                <EmailTemplatesTable
                   context={context}
                   channelId={selectedChannel!}
                   locale={selectedLocale}

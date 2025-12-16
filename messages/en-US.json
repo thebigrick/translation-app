@@ -146,6 +146,7 @@
         "products": "Products",
         "categories": "Categories",
         "brands": "Brands",
+        "emailTemplates": "Email Templates",
         "sharedOptions": "Shared Options",
         "sharedModifiers": "Shared Modifiers"
       },
@@ -185,6 +186,8 @@
         "products": "Products",
         "categories": "Categories",
         "brands": "Brands",
+        "emailTemplates": "Email Templates",
+        "email-templates": "Email Templates",
         "sharedModifiers": "Shared Modifiers",
         "sharedOptions": "Shared Options"
       },
