@@ -104,11 +104,22 @@ export default function EmailTemplatesTable({
   }, [channelId, locale, fetchTemplates]);
 
   const handleTemplateClick = (templateName: string) => {
+    // Always read the latest values from localStorage to ensure we use current selection
+    // This ensures that even if props haven't updated yet, we use the most recent selection
+    const storedChannelId = localStorage.getItem('translations_manage_selected_channel');
+    const storedLocale = localStorage.getItem('translations_manage_selected_locale');
+    
+    // Use stored values if available, otherwise fall back to props
+    const currentChannelId = storedChannelId || channelId.toString();
+    const currentLocale = storedLocale || locale;
+    // defaultLocale prop is already calculated correctly based on selected channel
+    const currentDefaultLocale = defaultLocale;
+    
     const params = new URLSearchParams();
     if (context) params.set("context", context);
-    params.set("channelId", channelId.toString());
-    params.set("locale", locale);
-    params.set("defaultLocale", defaultLocale);
+    params.set("channelId", currentChannelId);
+    params.set("locale", currentLocale);
+    params.set("defaultLocale", currentDefaultLocale);
     
     router.push(
       `/translations/manage/email-templates/${encodeURIComponent(templateName)}?${params.toString()}`

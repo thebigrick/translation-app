@@ -18,7 +18,7 @@ import {
   Link,
 } from "@bigcommerce/big-design";
 import { Header, Page } from "@bigcommerce/big-design-patterns";
-import { getTemplateTypeDisplayName, extractTranslationKeys, extractReadableText } from "@/lib/utils/email-template-helpers";
+import { getTemplateTypeDisplayName, extractReadableText } from "@/lib/utils/email-template-helpers";
 import { LoadingScreen } from "@/components/loading-indicator";
 import { Suspense } from "react";
 import HtmlEditor from "@/components/html-editor";
@@ -88,8 +88,11 @@ function EmailTemplateDetailContent({
 
       setTemplate(foundTemplate);
       
-      // Extract available keys from the body HTML
-      const keys = extractTranslationKeys(foundTemplate.originalBody || foundTemplate.body || '');
+      // Get available keys from defaultValues returned by API (instead of parsing body)
+      // defaultValues contains all keys, even those without default values (empty string)
+      const keys = foundTemplate.defaultValues 
+        ? Object.keys(foundTemplate.defaultValues).sort()
+        : [];
       setAvailableKeys(keys);
       
       // Initialize editing keys with existing translations or empty strings
@@ -106,11 +109,12 @@ function EmailTemplateDetailContent({
     }
   }, [context, channelId, locale, templateName]);
 
+  // Fetch template when URL params change
   useEffect(() => {
     if (context && channelId && locale) {
       fetchTemplate();
     }
-  }, [fetchTemplate]);
+  }, [context, channelId, locale, templateName, fetchTemplate]);
 
   // Fetch store hash for building edit URL
   useEffect(() => {
